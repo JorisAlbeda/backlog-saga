@@ -1,15 +1,24 @@
 <script setup lang="ts">
-import type { Category, Todo } from '~~/shared/types'
+import type { Category, Todo } from "~~/shared/types"
 
-useHead({ title: 'Ledger' })
+useHead({ title: "Ledger" })
 
-const { todos, lastSyncedAt, refresh, createTodo, completeTodo, removeTodo, startPolling, stopPolling } = useTodos()
+const {
+  todos,
+  lastSyncedAt,
+  refresh,
+  createTodo,
+  completeTodo,
+  removeTodo,
+  startPolling,
+  stopPolling,
+} = useTodos()
 
 onMounted(async () => {
   try {
     await refresh()
   } catch (err) {
-    console.error('[ledger] initial load failed', err)
+    console.error("[ledger] initial load failed", err)
   }
   startPolling()
 })
@@ -18,19 +27,30 @@ onUnmounted(() => {
 })
 
 const sortedTodos = computed(() =>
-  [...todos.value].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+  [...todos.value].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+  ),
 )
 
 const showAddOverlay = ref(false)
 const editingTodo = ref<Todo | null>(null)
 const completingTodo = ref<Todo | null>(null)
 
-async function handleAddSubmit({ title, category }: { title: string; category: Category }) {
+async function handleAddSubmit({
+  title,
+  category,
+}: {
+  title: string
+  category: Category
+}) {
   if (editingTodo.value) {
     try {
-      await $fetch(`/api/todos/${editingTodo.value.id}`, { method: 'PATCH', body: { title, category } })
+      await $fetch(`/api/todos/${editingTodo.value.id}`, {
+        method: "PATCH",
+        body: { title, category },
+      })
     } catch (err) {
-      console.error('[ledger] failed to save task', err)
+      console.error("[ledger] failed to save task", err)
     }
     await refresh()
     editingTodo.value = null
@@ -63,7 +83,9 @@ function goToDispatch(todo: Todo) {
     <LedgerHeader />
 
     <EmptyState v-if="sortedTodos.length === 0" variant="ledger">
-      <PrimaryButton variant="navy" @click="showAddOverlay = true">Draft First Task</PrimaryButton>
+      <PrimaryButton variant="navy" @click="showAddOverlay = true"
+        >Draft First Task</PrimaryButton
+      >
     </EmptyState>
 
     <ul v-else class="task-list">
