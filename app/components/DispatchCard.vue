@@ -1,25 +1,26 @@
 <script setup lang="ts">
 withDefaults(
   defineProps<{
-    buildingName: string
-    material?: string
+    resultName: string
+    resultDetail?: string
     dispatch: string
     sourceTask: string
+    dispatchLabel?: string
     compact?: boolean
   }>(),
-  { compact: false }
+  { compact: false, dispatchLabel: 'Guild Dispatch' }
 )
 </script>
 
 <template>
   <article class="dispatch-card" :class="{ 'dispatch-card--compact': compact }">
     <div class="dispatch-card__eyebrow">
-      <span class="caption">Guild Dispatch</span>
+      <span class="caption">{{ dispatchLabel }}</span>
       <span class="dispatch-card__success caption">Success</span>
     </div>
 
-    <h3 class="dispatch-card__title">{{ buildingName }}</h3>
-    <p v-if="material" class="dispatch-card__material caption">{{ material }}</p>
+    <h3 class="dispatch-card__title">{{ resultName }}</h3>
+    <p v-if="resultDetail" class="dispatch-card__material caption">{{ resultDetail }}</p>
 
     <p class="dispatch-card__body">"{{ dispatch }}"</p>
 

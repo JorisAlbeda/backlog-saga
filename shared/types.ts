@@ -1,4 +1,14 @@
-export type GuildStatus = 'init' | 'categorised' | 'chronicled'
+export type GuildStatus = 'init' | 'drafted' | 'chronicled'
+
+// The faction the user picks for a task at creation. Fixed and determines
+// which faction reacts to the task and which prompts are sent to the LLM —
+// see shared/factions.ts for the per-category display/behavior config.
+export type Category =
+  | 'home-improvement'
+  | 'cleaning'
+  | 'communication-admin'
+  | 'creation-inspiration'
+  | 'health'
 
 export interface Todo {
   id: string
@@ -6,14 +16,18 @@ export interface Todo {
   createdAt: string
   completedAt: string | null
   guildStatus: GuildStatus
-  category?: string
+  category: Category
+  // AI-inferred specific noun within the chosen category's domain (e.g.
+  // "church" for a building, "a nature ritual" for a spell) — a glimpse of
+  // what's to come, generated independently of task completion.
+  subtype?: string
   text: {
     init: string
-    categorised?: string
+    drafted?: string
     chronicled?: string
   }
-  buildingName?: string
-  material?: string
+  resultName?: string
+  resultDetail?: string
   chronicleWritten: boolean
   // Bumped on every write. Callers that read a todo, do async work, then
   // write it back can pass the version they read to updateTodo() so a
@@ -31,15 +45,17 @@ export function getTaskState(todo: Pick<Todo, 'completedAt' | 'guildStatus'>): T
 
 export function currentGuildText(todo: Pick<Todo, 'guildStatus' | 'text'>): string {
   if (todo.guildStatus === 'chronicled' && todo.text.chronicled) return todo.text.chronicled
-  if (todo.guildStatus === 'categorised' && todo.text.categorised) return todo.text.categorised
+  if (todo.guildStatus === 'drafted' && todo.text.drafted) return todo.text.drafted
   return todo.text.init
 }
 
 export interface ChronicleEntry {
   number: number
   todoId: string
-  buildingName: string
-  material: string
+  category: Category
+  subtype: string
+  resultName: string
+  resultDetail: string
   sourceTask: string
   dispatch: string
   builtAt: string

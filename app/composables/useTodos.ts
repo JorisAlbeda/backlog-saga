@@ -1,4 +1,4 @@
-import type { Todo } from '~~/shared/types'
+import type { Category, Todo } from '~~/shared/types'
 
 // Module-scoped so every caller of useTodos() shares the same interval handle
 // rather than each component starting its own poll loop.
@@ -19,8 +19,8 @@ export function useTodos() {
     }
   }
 
-  async function createTodo(title: string) {
-    const todo = await $fetch<Todo>('/api/todos', { method: 'POST', body: { title } })
+  async function createTodo(title: string, category: Category) {
+    const todo = await $fetch<Todo>('/api/todos', { method: 'POST', body: { title, category } })
     todos.value = [...todos.value, todo]
     return todo
   }

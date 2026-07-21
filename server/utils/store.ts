@@ -1,4 +1,5 @@
-import type { ChronicleEntry, Todo } from '../../shared/types'
+import type { Category, ChronicleEntry, Todo } from '../../shared/types'
+import { CATEGORIES, FACTIONS } from '../../shared/factions'
 
 const TODOS_KEY = 'todos.json'
 const CHRONICLE_KEY = 'chronicle.json'
@@ -30,7 +31,29 @@ async function saveTodos(todos: Todo[]) {
   await db().setItem(TODOS_KEY, todos)
 }
 
-export async function createTodo(title: string): Promise<Todo> {
+// The guild-progress fields, reset to their pre-drafted state for a given
+// category. Shared by createTodo and every place that needs to reset guild
+// progress (category changed, task reopened) so they can't drift apart.
+export function initialGuildState(
+  category: Category
+): Pick<Todo, 'guildStatus' | 'subtype' | 'text' | 'resultName' | 'resultDetail' | 'chronicleWritten'> {
+  return {
+    guildStatus: 'init',
+    subtype: undefined,
+    text: { init: FACTIONS[category].initTemplate },
+    resultName: undefined,
+    resultDetail: undefined,
+    chronicleWritten: false
+  }
+}
+
+export function assertValidCategory(category: unknown): asserts category is Category {
+  if (typeof category !== 'string' || !CATEGORIES.includes(category as Category)) {
+    throw createError({ statusCode: 400, statusMessage: `category must be one of: ${CATEGORIES.join(', ')}` })
+  }
+}
+
+export async function createTodo(title: string, category: Category): Promise<Todo> {
   return withLock(async () => {
     const todos = await listTodos()
     const todo: Todo = {
@@ -38,9 +61,8 @@ export async function createTodo(title: string): Promise<Todo> {
       title,
       createdAt: new Date().toISOString(),
       completedAt: null,
-      guildStatus: 'init',
-      text: { init: 'The Construction Guild is building.' },
-      chronicleWritten: false,
+      category,
+      ...initialGuildState(category),
       version: 1
     }
     todos.push(todo)
@@ -54,13 +76,19 @@ export async function getTodo(id: string): Promise<Todo | undefined> {
   return todos.find(t => t.id === id)
 }
 
-// `expectedVersion`, when passed, makes this an optimistic-concurrency write:
-// if the stored todo's version no longer matches (it changed since the
-// caller read it), the write is rejected and undefined is returned instead
-// of silently overwriting the newer state.
+// Two ways to call this:
+//  - a plain patch object + `expectedVersion`: an optimistic-concurrency
+//    write for callers (guild.ts) that read a todo, did slow async work
+//    (an LLM call) based on that snapshot, and need the write rejected if
+//    the todo changed underneath them in the meantime.
+//  - an updater function `(current) => patch`: an atomic read-modify-write
+//    for callers (the PATCH route) that can decide the patch entirely from
+//    the live stored value, computed inside the same lock acquisition that
+//    performs the write — no separate pre-read or version needed, and
+//    "not found" is the only way this can fail.
 export async function updateTodo(
   id: string,
-  patch: Partial<Todo>,
+  patchOrUpdater: Partial<Todo> | ((current: Todo) => Partial<Todo>),
   expectedVersion?: number
 ): Promise<Todo | undefined> {
   return withLock(async () => {
@@ -68,6 +96,7 @@ export async function updateTodo(
     const idx = todos.findIndex(t => t.id === id)
     if (idx === -1) return undefined
     if (expectedVersion !== undefined && todos[idx].version !== expectedVersion) return undefined
+    const patch = typeof patchOrUpdater === 'function' ? patchOrUpdater(todos[idx]) : patchOrUpdater
     todos[idx] = { ...todos[idx], ...patch, version: todos[idx].version + 1 }
     await saveTodos(todos)
     return todos[idx]

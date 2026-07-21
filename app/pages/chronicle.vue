@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ChronicleEntry } from '~~/shared/types'
+import { getFaction } from '~~/shared/factions'
 
 const { data: entries, error, refresh } = await useFetch<ChronicleEntry[]>('/api/chronicle')
 
@@ -13,7 +14,7 @@ onMounted(() => {
     <LedgerHeader
       title="THE CHRONICLE"
       volume-label="ACCUMULATED DISPATCHES"
-      subtitle="Every building the Guild has raised so far"
+      subtitle="Every dispatch the factions have sent so far"
       link-to="/"
       link-label="Ledger"
     />
@@ -31,10 +32,11 @@ onMounted(() => {
       <li v-for="entry in entries" :key="entry.number">
         <DispatchCard
           compact
-          :building-name="entry.buildingName"
-          :material="entry.material"
+          :result-name="entry.resultName"
+          :result-detail="entry.resultDetail"
           :dispatch="entry.dispatch"
           :source-task="entry.sourceTask"
+          :dispatch-label="getFaction(entry.category).dispatchLabel"
         />
       </li>
     </ul>

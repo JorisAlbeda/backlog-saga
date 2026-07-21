@@ -20,8 +20,8 @@ withDefaults(
     <template v-if="variant === 'ledger'">
       <h2>The ledger stands empty</h2>
       <p>
-        No commissions are on record. Draft your first task, and the Construction Guild will begin its work
-        the moment it's done.
+        No commissions are on record. Draft your first task, and the responsible faction will begin its
+        work the moment it's done.
       </p>
       <slot />
     </template>
@@ -29,7 +29,7 @@ withDefaults(
     <template v-else>
       <h2>The Chronicle awaits</h2>
       <p>
-        Nothing has been built yet. Complete a task in the Ledger, and the Guild's first dispatch will
+        Nothing has been recorded yet. Complete a task in the Ledger, and the first dispatch will
         appear here once it's ready.
       </p>
       <slot />

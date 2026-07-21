@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Todo } from '~~/shared/types'
+import type { Category, Todo } from '~~/shared/types'
 
 const { todos, lastSyncedAt, refresh, createTodo, completeTodo, removeTodo, startPolling, stopPolling } = useTodos()
 
@@ -23,17 +23,17 @@ const showAddOverlay = ref(false)
 const editingTodo = ref<Todo | null>(null)
 const completingTodo = ref<Todo | null>(null)
 
-async function handleAddSubmit(title: string) {
+async function handleAddSubmit({ title, category }: { title: string; category: Category }) {
   if (editingTodo.value) {
     try {
-      await $fetch(`/api/todos/${editingTodo.value.id}`, { method: 'PATCH', body: { title } })
+      await $fetch(`/api/todos/${editingTodo.value.id}`, { method: 'PATCH', body: { title, category } })
     } catch (err) {
-      console.error('[ledger] failed to save task title', err)
+      console.error('[ledger] failed to save task', err)
     }
     await refresh()
     editingTodo.value = null
   } else {
-    await createTodo(title)
+    await createTodo(title, category)
     showAddOverlay.value = false
   }
 }
@@ -90,6 +90,7 @@ function goToDispatch(todo: Todo) {
       v-if="editingTodo"
       mode="edit"
       :initial-title="editingTodo.title"
+      :initial-category="editingTodo.category"
       @submit="handleAddSubmit"
       @dismiss="editingTodo = null"
     />
