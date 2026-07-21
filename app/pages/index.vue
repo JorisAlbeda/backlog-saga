@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { Category, Todo } from '~~/shared/types'
 
+useHead({ title: 'Ledger' })
+
 const { todos, lastSyncedAt, refresh, createTodo, completeTodo, removeTodo, startPolling, stopPolling } = useTodos()
 
 onMounted(async () => {

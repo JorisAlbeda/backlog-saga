@@ -2,6 +2,8 @@
 import type { ChronicleEntry } from '~~/shared/types'
 import { getFaction } from '~~/shared/factions'
 
+useHead({ title: 'Chronicle' })
+
 const { data: entries, error, refresh } = await useFetch<ChronicleEntry[]>('/api/chronicle')
 
 onMounted(() => {

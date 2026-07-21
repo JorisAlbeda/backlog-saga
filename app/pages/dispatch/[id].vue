@@ -2,6 +2,8 @@
 import { currentGuildText, getTaskState, type Todo } from '~~/shared/types'
 import { getFaction } from '~~/shared/factions'
 
+useHead({ title: 'Dispatch' })
+
 const route = useRoute()
 const id = route.params.id as string
 
