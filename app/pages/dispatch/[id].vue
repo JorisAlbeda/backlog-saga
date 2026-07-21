@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import type { Todo } from '~~/shared/types'
+import { currentGuildText, getTaskState, type Todo } from '~~/shared/types'
 
 const route = useRoute()
 const id = route.params.id as string
 
 const { data: todo, error } = await useFetch<Todo>(`/api/todos/${id}`)
+const state = computed(() => (todo.value ? getTaskState(todo.value) : undefined))
 </script>
 
 <template>
@@ -18,11 +19,16 @@ const { data: todo, error } = await useFetch<Todo>(`/api/todos/${id}`)
       <PrimaryButton variant="navy" @click="navigateTo('/')">Return to Ledger</PrimaryButton>
     </div>
 
+    <div v-else-if="state !== 'done'" class="dispatch-page__missing">
+      <p>The Construction Guild hasn't finished this one yet.</p>
+      <PrimaryButton variant="navy" @click="navigateTo('/')">Return to Ledger</PrimaryButton>
+    </div>
+
     <div v-else-if="todo" class="dispatch-page__content">
       <DispatchCard
         :building-name="todo.buildingName ?? 'Building'"
         :material="todo.material"
-        :dispatch="todo.text.chronicled ?? todo.text.categorised ?? todo.text.init"
+        :dispatch="currentGuildText(todo)"
         :source-task="todo.title"
       />
 

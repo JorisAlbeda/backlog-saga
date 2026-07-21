@@ -25,11 +25,19 @@ export async function runGuildResolution(): Promise<GuildRunResult> {
     if (todo.guildStatus !== 'init') continue
     try {
       const { category } = await generateCategory(todo.title)
-      await updateTodo(todo.id, {
-        guildStatus: 'categorised',
-        category,
-        text: { ...todo.text, categorised: `By Imperial order, the Construction Guild is building a ${category}.` }
-      })
+      const updated = await updateTodo(
+        todo.id,
+        {
+          guildStatus: 'categorised',
+          category,
+          text: { ...todo.text, categorised: `By Imperial order, the Construction Guild is building a ${category}.` }
+        },
+        todo.version
+      )
+      if (!updated) {
+        console.warn(`[guild] skipped categorising todo ${todo.id}: changed concurrently`)
+        continue
+      }
       categorised++
     } catch (err) {
       console.error(`[guild] category generation failed for todo ${todo.id}`, err)
@@ -38,26 +46,35 @@ export async function runGuildResolution(): Promise<GuildRunResult> {
 
   const afterCategory = await listTodos()
   for (const todo of afterCategory) {
-    if (!todo.completedAt || todo.guildStatus === 'chronicled' || !todo.category) continue
+    if (!todo.completedAt || todo.chronicleWritten || !todo.category) continue
     try {
       const { buildingName, material, dispatch } = await generateChronicle(todo.title, todo.category)
-      await updateTodo(todo.id, {
-        guildStatus: 'chronicled',
-        text: { ...todo.text, chronicled: dispatch },
+      // Write the permanent Chronicle/world-material records first; only once
+      // they've succeeded do we flip guildStatus/chronicleWritten, and both
+      // flip together in a single write so the two can never disagree.
+      const entry = await appendChronicleEntry({
+        todoId: todo.id,
         buildingName,
-        material
+        material,
+        sourceTask: todo.title,
+        dispatch,
+        builtAt: new Date().toISOString()
       })
-      if (!todo.chronicleWritten) {
-        const entry = await appendChronicleEntry({
-          todoId: todo.id,
+      await appendWorldMaterial(entry)
+      const updated = await updateTodo(
+        todo.id,
+        {
+          guildStatus: 'chronicled',
+          text: { ...todo.text, chronicled: dispatch },
           buildingName,
           material,
-          sourceTask: todo.title,
-          dispatch,
-          builtAt: new Date().toISOString()
-        })
-        await appendWorldMaterial(entry)
-        await updateTodo(todo.id, { chronicleWritten: true })
+          chronicleWritten: true
+        },
+        todo.version
+      )
+      if (!updated) {
+        console.warn(`[guild] chronicled todo ${todo.id} but it changed concurrently; state not applied`)
+        continue
       }
       chronicled++
     } catch (err) {

@@ -53,15 +53,24 @@ const GUILD_VOICE =
   'You are the record-keeper for the Construction Guild in a fantasy world, writing entries for a tabletop RPG chronicle. Respond ONLY with strict JSON, no commentary, no markdown fences.'
 
 export async function generateCategory(title: string): Promise<CategoryResult> {
-  return chatJSON<CategoryResult>(
+  const result = await chatJSON<CategoryResult>(
     GUILD_VOICE,
     `A real-world task was just completed: "${title}". In one word or short phrase, name the type of building the Construction Guild would raise in tribute to this task (e.g. "church", "aqueduct", "watchtower", "granary"). Respond as JSON: {"category": "..."}.`
   )
+  if (typeof result?.category !== 'string' || !result.category.trim()) {
+    throw new Error('generateCategory: model response missing a usable "category" string')
+  }
+  return result
 }
 
 export async function generateChronicle(title: string, category: string): Promise<ChronicleResult> {
-  return chatJSON<ChronicleResult>(
+  const result = await chatJSON<ChronicleResult>(
     GUILD_VOICE,
     `A real-world task was completed: "${title}". The Construction Guild has finished building a ${category} in tribute to it. Invent a fitting proper name for the building, the material it's built from, and write a short (2-4 sentence) in-character dispatch announcing its completion, in a fantasy-guild register. The dispatch should thematically resemble the task without literally repeating its wording. Respond as JSON: {"buildingName": "...", "material": "...", "dispatch": "..."}.`
   )
+  const fields = [result?.buildingName, result?.material, result?.dispatch]
+  if (fields.some(f => typeof f !== 'string' || !f.trim())) {
+    throw new Error('generateChronicle: model response missing a usable buildingName/material/dispatch string')
+  }
+  return result
 }

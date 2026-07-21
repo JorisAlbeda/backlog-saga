@@ -4,7 +4,11 @@ import type { Todo } from '~~/shared/types'
 const { todos, lastSyncedAt, refresh, createTodo, completeTodo, removeTodo, startPolling, stopPolling } = useTodos()
 
 onMounted(async () => {
-  await refresh()
+  try {
+    await refresh()
+  } catch (err) {
+    console.error('[ledger] initial load failed', err)
+  }
   startPolling()
 })
 onUnmounted(() => {
@@ -21,7 +25,11 @@ const completingTodo = ref<Todo | null>(null)
 
 async function handleAddSubmit(title: string) {
   if (editingTodo.value) {
-    await $fetch(`/api/todos/${editingTodo.value.id}`, { method: 'PATCH', body: { title } })
+    try {
+      await $fetch(`/api/todos/${editingTodo.value.id}`, { method: 'PATCH', body: { title } })
+    } catch (err) {
+      console.error('[ledger] failed to save task title', err)
+    }
     await refresh()
     editingTodo.value = null
   } else {

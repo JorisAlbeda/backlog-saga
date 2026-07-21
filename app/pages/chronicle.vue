@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ChronicleEntry } from '~~/shared/types'
 
-const { data: entries, refresh } = await useFetch<ChronicleEntry[]>('/api/chronicle')
+const { data: entries, error, refresh } = await useFetch<ChronicleEntry[]>('/api/chronicle')
 
 onMounted(() => {
   refresh()
@@ -18,7 +18,12 @@ onMounted(() => {
       link-label="Ledger"
     />
 
-    <EmptyState v-if="!entries || entries.length === 0" variant="chronicle">
+    <div v-if="error" class="chronicle-page__error">
+      <p>The Chronicle could not be reached. Try again shortly.</p>
+      <PrimaryButton variant="navy" @click="refresh()">Retry</PrimaryButton>
+    </div>
+
+    <EmptyState v-else-if="!entries || entries.length === 0" variant="chronicle">
       <PrimaryButton variant="navy" @click="navigateTo('/')">Return to Ledger</PrimaryButton>
     </EmptyState>
 
@@ -39,6 +44,15 @@ onMounted(() => {
 <style scoped>
 .chronicle-page {
   padding-bottom: 32px;
+}
+
+.chronicle-page__error {
+  padding: 64px var(--spacing-screen-inset) 32px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
 }
 
 .chronicle-scroll {

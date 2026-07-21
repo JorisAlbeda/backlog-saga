@@ -15,6 +15,11 @@ export interface Todo {
   buildingName?: string
   material?: string
   chronicleWritten: boolean
+  // Bumped on every write. Callers that read a todo, do async work, then
+  // write it back can pass the version they read to updateTodo() so a
+  // write against data that changed underneath (e.g. reopened, deleted)
+  // is rejected instead of silently clobbering the newer state.
+  version: number
 }
 
 export type TaskState = 'todo' | 'taking-shape' | 'done'
