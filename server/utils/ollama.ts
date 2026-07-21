@@ -1,10 +1,13 @@
-interface CategoryResult {
-  category: string
+import type { Category } from '../../shared/types'
+import { FACTIONS } from '../../shared/factions'
+
+interface SubtypeResult {
+  subtype: string
 }
 
 interface ChronicleResult {
-  buildingName: string
-  material: string
+  resultName: string
+  resultDetail: string
   dispatch: string
 }
 
@@ -49,28 +52,80 @@ async function chatJSON<T>(system: string, prompt: string): Promise<T> {
   return JSON.parse(content) as T
 }
 
-const GUILD_VOICE =
-  'You are the record-keeper for the Construction Guild in a fantasy world, writing entries for a tabletop RPG chronicle. Respond ONLY with strict JSON, no commentary, no markdown fences.'
+// The bits of prompt text that vary per faction, on top of the shared
+// display config in shared/factions.ts (factionName/noun/doneVerb/
+// detailLabel). One template builds both prompts for every faction from
+// this table instead of five hand-written prompt pairs.
+interface FactionVoice {
+  persona: string
+  register: string
+  subtypeVerb: string
+  subtypeExamples: string[]
+}
 
-export async function generateCategory(title: string): Promise<CategoryResult> {
-  const result = await chatJSON<CategoryResult>(
-    GUILD_VOICE,
-    `A real-world task was just completed: "${title}". In one word or short phrase, name the type of building the Construction Guild would raise in tribute to this task (e.g. "church", "aqueduct", "watchtower", "granary"). Respond as JSON: {"category": "..."}.`
-  )
-  if (typeof result?.category !== 'string' || !result.category.trim()) {
-    throw new Error('generateCategory: model response missing a usable "category" string')
+const FACTION_VOICES: Record<Category, FactionVoice> = {
+  'home-improvement': {
+    persona: 'the record-keeper for the Construction Guild',
+    register: 'fantasy-guild',
+    subtypeVerb: 'raise',
+    subtypeExamples: ['church', 'aqueduct', 'watchtower', 'granary']
+  },
+  cleaning: {
+    persona: "an Archivist cataloguing recovered documents for a fantasy world's Archive",
+    register: 'fantasy-archive',
+    subtypeVerb: 'recover',
+    subtypeExamples: ['ledger', 'treaty', "cartographer's map", 'private letter']
+  },
+  'communication-admin': {
+    persona: 'the loremaster of a fantasy tavern',
+    register: 'fantasy-tavern',
+    subtypeVerb: 'welcome',
+    subtypeExamples: ['a traveling merchant', 'a retired duelist', 'the town crier']
+  },
+  'creation-inspiration': {
+    persona: 'an archmage of the Mage Tower',
+    register: 'fantasy-arcane',
+    subtypeVerb: 'create',
+    subtypeExamples: ['a nature ritual', 'an illusion', 'a protective ward']
+  },
+  health: {
+    persona: 'a healer of the Temple',
+    register: 'fantasy-temple',
+    subtypeVerb: 'recall',
+    subtypeExamples: ["a forgotten remedy", 'an old legend', "a herbalist's rite"]
+  }
+}
+
+function voiceFor(category: Category): string {
+  return `You are ${FACTION_VOICES[category].persona}, writing entries for a tabletop RPG chronicle. Respond ONLY with strict JSON, no commentary, no markdown fences.`
+}
+
+function subtypePromptFor(category: Category, title: string): string {
+  const faction = FACTIONS[category]
+  const { subtypeVerb, subtypeExamples } = FACTION_VOICES[category]
+  const examples = subtypeExamples.map(example => `"${example}"`).join(', ')
+  return `A task has been logged: "${title}". In one short phrase, name the type of ${faction.noun} the ${faction.factionName} would ${subtypeVerb} in tribute to this task (e.g. ${examples}). Respond as JSON: {"subtype": "..."}.`
+}
+
+function chroniclePromptFor(category: Category, title: string, subtype: string): string {
+  const faction = FACTIONS[category]
+  const { register } = FACTION_VOICES[category]
+  return `A real-world task was completed: "${title}". The ${faction.factionName} ${faction.doneVerb.toLowerCase()} ${subtype} in tribute to it. Invent a fitting proper name for the ${faction.noun}, its ${faction.detailLabel.toLowerCase()}, and write a short (2-4 sentence) in-character dispatch about it, in a ${register} register. The dispatch should thematically resemble the task without literally repeating its wording. Respond as JSON: {"resultName": "...", "resultDetail": "...", "dispatch": "..."}.`
+}
+
+export async function generateSubtype(title: string, category: Category): Promise<SubtypeResult> {
+  const result = await chatJSON<SubtypeResult>(voiceFor(category), subtypePromptFor(category, title))
+  if (typeof result?.subtype !== 'string' || !result.subtype.trim()) {
+    throw new Error(`generateSubtype: model response missing a usable "subtype" string for category ${category}`)
   }
   return result
 }
 
-export async function generateChronicle(title: string, category: string): Promise<ChronicleResult> {
-  const result = await chatJSON<ChronicleResult>(
-    GUILD_VOICE,
-    `A real-world task was completed: "${title}". The Construction Guild has finished building a ${category} in tribute to it. Invent a fitting proper name for the building, the material it's built from, and write a short (2-4 sentence) in-character dispatch announcing its completion, in a fantasy-guild register. The dispatch should thematically resemble the task without literally repeating its wording. Respond as JSON: {"buildingName": "...", "material": "...", "dispatch": "..."}.`
-  )
-  const fields = [result?.buildingName, result?.material, result?.dispatch]
+export async function generateChronicle(title: string, category: Category, subtype: string): Promise<ChronicleResult> {
+  const result = await chatJSON<ChronicleResult>(voiceFor(category), chroniclePromptFor(category, title, subtype))
+  const fields = [result?.resultName, result?.resultDetail, result?.dispatch]
   if (fields.some(f => typeof f !== 'string' || !f.trim())) {
-    throw new Error('generateChronicle: model response missing a usable buildingName/material/dispatch string')
+    throw new Error(`generateChronicle: model response missing a usable resultName/resultDetail/dispatch string for category ${category}`)
   }
   return result
 }

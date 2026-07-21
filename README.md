@@ -1,8 +1,12 @@
 # Backlog Saga — PoC
 
-Complete a TODO → the Construction Guild builds something because of it → that
-building gets written to `world-material.md` for a future Oath session, and is
-browsable in-app via the Chronicle.
+Pick a category for a TODO → the matching faction reacts and produces
+something in tribute → that entry gets written to `world-material.md` for a
+future Oath session, and is browsable in-app via the Chronicle. Five
+factions: Construction Guild (Home Improvement, builds a building), The
+Archivists (Cleaning, recovers a document), The Tavern (Communication &
+Admin, introduces a character), The Mage Tower (Creation & Inspiration,
+creates a spell), The Healer's Temple (Health, recalls a piece of lore).
 
 Built to `Backlog-Saga-Build-Brief-ClaudeCode.md` and
 `Backlog-Saga-PoC-Design-Handoff.md`. This README covers what those two docs
@@ -25,7 +29,7 @@ built on), copy `.env.example` to `.env` and point `OLLAMA_BASE_URL` at it —
 including a LAN IP if Ollama runs on another machine on the same home
 network. Model defaults to `qwen3:8b`.
 
-**Not verified end-to-end here**: actual `categorised`/`chronicled` LLM
+**Not verified end-to-end here**: actual `drafted`/`chronicled` LLM
 output, since no Ollama instance was available during this build. Everything
 downstream of "Ollama responds to `/api/chat`" (JSON parsing, tier upgrades,
 Chronicle writing, `world-material.md` formatting) is implemented per spec
@@ -46,16 +50,19 @@ Nitro's dev task endpoint: `curl -X POST http://localhost:3000/_nitro/tasks/guil
   below), `format: "json"` for reliable output from an 8B model, and strips
   any stray `<think>` block as a defensive fallback.
 - `server/utils/guild.ts` — the staged-resolution orchestration: advances
-  `init → categorised → chronicled`, only when Ollama is reachable, never
+  `init → drafted → chronicled`, only when Ollama is reachable, never
   throwing out of a single todo's failure.
 - `server/tasks/guild/resolve.ts` — the Nitro scheduled task (`* * * * *`)
   that drives the above.
-- `server/utils/worldMaterial.ts` — appends each finished building to
+- `server/utils/worldMaterial.ts` — appends each finished entry to
   `world-material.md` (created at the project root on first write).
 - `shared/types.ts` — the `Todo`/`ChronicleEntry` shapes and the
   `getTaskState`/`currentGuildText` helpers, imported by both server and
   client so the three-state model (`todo` / `taking-shape` / `done`) can
   never drift between frontend and backend — it's derived, not stored.
+- `shared/factions.ts` — the five categories' display/behavior config
+  (faction name, produced noun, dispatch label, etc.), also shared by
+  server and client.
 - `app/pages/index.vue` — the Ledger (empty state, task list, add/edit
   overlay, completion overlay).
 - `app/pages/dispatch/[id].vue` — full dispatch view for a Done task.
@@ -69,8 +76,7 @@ Nitro's dev task endpoint: `curl -X POST http://localhost:3000/_nitro/tasks/guil
 ## Assumptions and judgement calls
 
 **Fixed by the brief, not reinterpreted:** Nuxt/Nitro, local Ollama over a
-cloud API, `qwen3:8b`, staged resolution via `scheduledTasks`, one faction
-only.
+cloud API, `qwen3:8b`, staged resolution via `scheduledTasks`.
 
 **Ollama call path.** The brief asks to confirm `think: false` works via
 Ollama's OpenAI-compatible endpoint before relying on it, falling back to
@@ -80,12 +86,16 @@ good engineering — the native endpoint is documented to support
 `think: false` reliably, so that's the only call path implemented. Worth a
 real check once this runs against a live Ollama instance.
 
-**Data shape.** `guildStatus: 'init' | 'categorised' | 'chronicled'` tracks
-how much of the Guild's message is *prepared*, independent of whether the
-task itself is done — it can advance from `init` to `categorised` while a
-todo is still open. The three UI states (`To Do` / `Taking Shape` / `Done`)
-are derived from `guildStatus` + `completedAt`, never stored directly, so
-they can't drift out of sync.
+**Data shape.** The user picks a fixed `category` (one of five factions) at
+creation time — it's no longer AI-inferred. `guildStatus: 'init' | 'drafted'
+| 'chronicled'` tracks how much of the faction's message is *prepared*,
+independent of whether the task itself is done — it can advance from `init`
+to `drafted` while a todo is still open, once the AI has inferred a
+`subtype` within the chosen category (e.g. "church" for a building, "a
+nature ritual" for a spell) and produced a first glimpse of what's to come.
+The three UI states (`To Do` / `Taking Shape` / `Done`) are derived from
+`guildStatus` + `completedAt`, never stored directly, so they can't drift
+out of sync.
 
 **Open items from the handoff**, resolved rather than guessed around:
 

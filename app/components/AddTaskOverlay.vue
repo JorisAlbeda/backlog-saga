@@ -1,18 +1,23 @@
 <script setup lang="ts">
+import type { Category } from '~~/shared/types'
+import { CATEGORIES, FACTIONS } from '~~/shared/factions'
+
 const props = withDefaults(
   defineProps<{
     initialTitle?: string
+    initialCategory?: Category
     mode?: 'create' | 'edit'
   }>(),
-  { initialTitle: '', mode: 'create' }
+  { initialTitle: '', initialCategory: undefined, mode: 'create' }
 )
 
 const emit = defineEmits<{
-  submit: [string]
+  submit: [{ title: string; category: Category }]
   dismiss: []
 }>()
 
 const title = ref(props.initialTitle)
+const category = ref<Category | ''>(props.initialCategory ?? '')
 const inputRef = ref<HTMLInputElement | null>(null)
 
 onMounted(() => {
@@ -21,8 +26,8 @@ onMounted(() => {
 
 function onSubmit() {
   const trimmed = title.value.trim()
-  if (!trimmed) return
-  emit('submit', trimmed)
+  if (!trimmed || !category.value) return
+  emit('submit', { title: trimmed, category: category.value })
 }
 </script>
 
@@ -41,7 +46,18 @@ function onSubmit() {
         aria-label="Task title"
       >
 
-      <PrimaryButton type="submit" variant="navy" :disabled="!title.trim()">
+      <label class="caption overlay-card__label" for="add-task-category">Category</label>
+      <select
+        id="add-task-category"
+        v-model="category"
+        class="overlay-card__input"
+        aria-label="Task category"
+      >
+        <option value="" disabled>Select a category…</option>
+        <option v-for="c in CATEGORIES" :key="c" :value="c">{{ FACTIONS[c].selectLabel }}</option>
+      </select>
+
+      <PrimaryButton type="submit" variant="navy" :disabled="!title.trim() || !category">
         {{ mode === 'edit' ? 'Save Changes' : 'Add to the Ledger' }}
       </PrimaryButton>
     </form>
@@ -94,5 +110,15 @@ function onSubmit() {
 .overlay-card__input:focus {
   outline: 2px solid var(--color-cta-primary);
   outline-offset: 1px;
+}
+
+.overlay-card__label {
+  display: block;
+  margin: 0 0 6px;
+}
+
+select.overlay-card__input {
+  appearance: auto;
+  cursor: pointer;
 }
 </style>

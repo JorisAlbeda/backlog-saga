@@ -1,17 +1,21 @@
 <script setup lang="ts">
 import { currentGuildText, getTaskState, type Todo } from '~~/shared/types'
+import { getFaction } from '~~/shared/factions'
+
+useHead({ title: 'Dispatch' })
 
 const route = useRoute()
 const id = route.params.id as string
 
 const { data: todo, error } = await useFetch<Todo>(`/api/todos/${id}`)
 const state = computed(() => (todo.value ? getTaskState(todo.value) : undefined))
+const faction = computed(() => (todo.value ? getFaction(todo.value.category) : undefined))
 </script>
 
 <template>
   <div class="dispatch-page">
     <header class="dispatch-page__header">
-      <p class="caption">Guild Dispatch</p>
+      <p class="caption">{{ faction?.dispatchLabel ?? 'Dispatch' }}</p>
     </header>
 
     <div v-if="error" class="dispatch-page__missing">
@@ -20,16 +24,17 @@ const state = computed(() => (todo.value ? getTaskState(todo.value) : undefined)
     </div>
 
     <div v-else-if="state !== 'done'" class="dispatch-page__missing">
-      <p>The Construction Guild hasn't finished this one yet.</p>
+      <p>The {{ faction?.factionName ?? 'guild' }} hasn't finished this one yet.</p>
       <PrimaryButton variant="navy" @click="navigateTo('/')">Return to Ledger</PrimaryButton>
     </div>
 
-    <div v-else-if="todo" class="dispatch-page__content">
+    <div v-else-if="todo && faction" class="dispatch-page__content">
       <DispatchCard
-        :building-name="todo.buildingName ?? 'Building'"
-        :material="todo.material"
+        :result-name="todo.resultName ?? faction.noun"
+        :result-detail="todo.resultDetail"
         :dispatch="currentGuildText(todo)"
         :source-task="todo.title"
+        :dispatch-label="faction.dispatchLabel"
       />
 
       <PrimaryButton variant="navy" @click="navigateTo('/')">Return to Ledger</PrimaryButton>

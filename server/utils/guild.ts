@@ -1,10 +1,11 @@
 import { appendChronicleEntry, listTodos, updateTodo } from './store'
-import { generateCategory, generateChronicle, isOllamaReachable } from './ollama'
+import { generateSubtype, generateChronicle, isOllamaReachable } from './ollama'
 import { appendWorldMaterial } from './worldMaterial'
+import { getFaction } from '../../shared/factions'
 
 export interface GuildRunResult {
   reachable: boolean
-  categorised: number
+  drafted: number
   chronicled: number
 }
 
@@ -14,48 +15,51 @@ export interface GuildRunResult {
 export async function runGuildResolution(): Promise<GuildRunResult> {
   const reachable = await isOllamaReachable()
   if (!reachable) {
-    return { reachable: false, categorised: 0, chronicled: 0 }
+    return { reachable: false, drafted: 0, chronicled: 0 }
   }
 
-  let categorised = 0
+  let drafted = 0
   let chronicled = 0
 
   const todos = await listTodos()
   for (const todo of todos) {
     if (todo.guildStatus !== 'init') continue
     try {
-      const { category } = await generateCategory(todo.title)
+      const { subtype } = await generateSubtype(todo.title, todo.category)
+      const faction = getFaction(todo.category)
       const updated = await updateTodo(
         todo.id,
         {
-          guildStatus: 'categorised',
-          category,
-          text: { ...todo.text, categorised: `By Imperial order, the Construction Guild is building a ${category}.` }
+          guildStatus: 'drafted',
+          subtype,
+          text: { ...todo.text, drafted: faction.draftedTemplate(subtype) }
         },
         todo.version
       )
       if (!updated) {
-        console.warn(`[guild] skipped categorising todo ${todo.id}: changed concurrently`)
+        console.warn(`[guild] skipped drafting todo ${todo.id}: changed concurrently`)
         continue
       }
-      categorised++
+      drafted++
     } catch (err) {
-      console.error(`[guild] category generation failed for todo ${todo.id}`, err)
+      console.error(`[guild] subtype generation failed for todo ${todo.id}`, err)
     }
   }
 
-  const afterCategory = await listTodos()
-  for (const todo of afterCategory) {
-    if (!todo.completedAt || todo.chronicleWritten || !todo.category) continue
+  const afterDraft = await listTodos()
+  for (const todo of afterDraft) {
+    if (!todo.completedAt || todo.chronicleWritten || !todo.subtype) continue
     try {
-      const { buildingName, material, dispatch } = await generateChronicle(todo.title, todo.category)
+      const { resultName, resultDetail, dispatch } = await generateChronicle(todo.title, todo.category, todo.subtype)
       // Write the permanent Chronicle/world-material records first; only once
       // they've succeeded do we flip guildStatus/chronicleWritten, and both
       // flip together in a single write so the two can never disagree.
       const entry = await appendChronicleEntry({
         todoId: todo.id,
-        buildingName,
-        material,
+        category: todo.category,
+        subtype: todo.subtype,
+        resultName,
+        resultDetail,
         sourceTask: todo.title,
         dispatch,
         builtAt: new Date().toISOString()
@@ -66,8 +70,8 @@ export async function runGuildResolution(): Promise<GuildRunResult> {
         {
           guildStatus: 'chronicled',
           text: { ...todo.text, chronicled: dispatch },
-          buildingName,
-          material,
+          resultName,
+          resultDetail,
           chronicleWritten: true
         },
         todo.version
@@ -82,5 +86,5 @@ export async function runGuildResolution(): Promise<GuildRunResult> {
     }
   }
 
-  return { reachable: true, categorised, chronicled }
+  return { reachable: true, drafted, chronicled }
 }

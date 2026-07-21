@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { currentGuildText, getTaskState, type Todo } from '~~/shared/types'
+import { getFaction } from '~~/shared/factions'
 
 const props = defineProps<{
   todo: Todo
@@ -15,6 +16,7 @@ const emit = defineEmits<{
 
 const state = computed(() => getTaskState(props.todo))
 const statusText = computed(() => currentGuildText(props.todo))
+const faction = computed(() => getFaction(props.todo.category))
 const interactive = computed(() => state.value === 'todo' || state.value === 'done')
 
 const glyphState = computed(() => {
@@ -26,7 +28,7 @@ const glyphState = computed(() => {
 const ariaLabel = computed(() => {
   if (state.value === 'todo') return `${props.todo.title}, to do`
   if (state.value === 'taking-shape') return `${props.todo.title}, taking shape — ${statusText.value}`
-  return `${props.todo.title}, done — ${props.todo.buildingName ?? 'building'} built`
+  return `${props.todo.title}, done — ${props.todo.resultName ?? faction.value.noun} ${faction.value.doneVerb.toLowerCase()}`
 })
 
 const nowTick = ref(Date.now())
@@ -81,7 +83,7 @@ function onKeydown(e: KeyboardEvent) {
       <p v-if="state === 'taking-shape'" class="task-row__synced caption">{{ lastSyncedLabel }}</p>
 
       <p v-if="state === 'done'" class="task-row__summary">
-        {{ todo.buildingName ?? 'Building' }} - Built
+        {{ todo.resultName ?? faction.noun }} - {{ faction.doneVerb }}
       </p>
     </div>
 
