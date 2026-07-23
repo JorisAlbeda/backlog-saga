@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { Category } from '../../shared/types'
-import { getCodexDir, getExistingSlugs, invalidateCodexCache } from './codex'
+import { codexDir, getExistingSlugs, invalidateCodexCache } from './codex'
 
 // Which codex category a generated entity belongs to. home-improvement and
 // communication-admin map onto an exact codex category; cleaning,
@@ -33,7 +33,10 @@ function formatEntry(name: string, description: string, history: string, locatio
 }
 
 export interface WriteBackInput {
-  category: Category
+  // Already mapped via codexCategoryFor() by the caller (which needs the
+  // same value for generateCodexEntry too) — passed pre-computed rather
+  // than re-derived here from a raw Category.
+  codexCategory: string
   resultName: string
   description: string
   history: string
@@ -46,37 +49,54 @@ export interface WriteBackInput {
 // against. Never throws — a failure here must not affect the todo's own
 // chronicled state, since chronicle.json/world-material.md (already written
 // by the time this runs) are the durable record of what happened, not this.
-// Which entity a given todo produced is already recoverable from
-// chronicle.json, so no separate bookkeeping file is kept here.
-export async function writeCodexEntry(input: WriteBackInput): Promise<void> {
+// Returns whether a file was actually written, since chronicle.json records
+// intent unconditionally and can't otherwise distinguish "this became a
+// real codex entry" from "this was skipped or failed."
+export async function writeCodexEntry(input: WriteBackInput): Promise<boolean> {
   try {
-    const dir = getCodexDir()
+    const dir = codexDir()
     if (!dir) {
       console.warn('[codexWriteBack] CODEX_DIR is not configured, skipping write-back')
-      return
+      return false
     }
 
-    const codexCategory = CODEX_CATEGORY_FOR[input.category]
     const slug = slugify(input.resultName)
     if (!slug) {
       console.warn(`[codexWriteBack] could not derive a slug from "${input.resultName}", skipping write-back`)
-      return
+      return false
     }
 
-    const existingSlugs = await getExistingSlugs(codexCategory)
+    const existingSlugs = await getExistingSlugs(input.codexCategory)
     if (existingSlugs.has(slug)) {
       console.warn(
-        `[codexWriteBack] "${input.resultName}" (${codexCategory}/${slug}) already exists in the codex, skipping write-back to avoid overwriting it`
+        `[codexWriteBack] "${input.resultName}" (${input.codexCategory}/${slug}) already exists in the codex, skipping write-back to avoid overwriting it`
       )
-      return
+      return false
     }
 
-    const categoryDir = resolve(dir, codexCategory)
+    const categoryDir = resolve(dir, input.codexCategory)
     mkdirSync(categoryDir, { recursive: true })
-    writeFileSync(resolve(categoryDir, `${slug}.md`), formatEntry(input.resultName, input.description, input.history, input.location), 'utf-8')
+    const content = formatEntry(input.resultName, input.description, input.history, input.location)
+    try {
+      // Exclusive create ('wx'): fails instead of silently overwriting if
+      // another writer (a second Backlog Saga process, rag's own
+      // catalogue.ts, or the planned Oath Simulator) creates the same slug
+      // between the existence check above and this write — the shared
+      // codex has no cross-process lock, so this keeps that race's failure
+      // mode loud instead of a silent data loss.
+      writeFileSync(resolve(categoryDir, `${slug}.md`), content, { encoding: 'utf-8', flag: 'wx' })
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+        console.warn(`[codexWriteBack] lost a race writing "${input.resultName}" (${input.codexCategory}/${slug}) — another writer created it first, skipping`)
+        return false
+      }
+      throw err
+    }
 
     invalidateCodexCache()
+    return true
   } catch (err) {
     console.warn(`[codexWriteBack] failed to write back a codex entry for "${input.resultName}"`, err)
+    return false
   }
 }

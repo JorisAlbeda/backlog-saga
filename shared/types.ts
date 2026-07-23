@@ -29,6 +29,13 @@ export interface Todo {
   resultName?: string
   resultDetail?: string
   chronicleWritten: boolean
+  // Whether generateCodexEntry/writeCodexEntry actually produced a file in
+  // the shared codex for this todo's result. chronicle.json/world-material
+  // are written unconditionally once chronicled, so this is the only
+  // record of whether the write-back itself succeeded, was skipped (e.g. a
+  // slug collision), or was never configured. Undefined until the
+  // write-back attempt runs.
+  codexEntryWritten?: boolean
   // Bumped on every write. Callers that read a todo, do async work, then
   // write it back can pass the version they read to updateTodo() so a
   // write against data that changed underneath (e.g. reopened, deleted)

@@ -53,7 +53,9 @@ export interface CodexStatus {
 // it for grounding and writes newly-generated entries directly into it (see
 // codexWriteBack.ts) — all writers share the same directory, the same
 // single source of truth, rather than each keeping a private supplement.
-function codexDir(): string | undefined {
+// Exported directly (rather than through a wrapper) so codexWriteBack.ts
+// writes to the exact same directory this module reads from.
+export function codexDir(): string | undefined {
   // Resolved once at config time (nuxt.config.ts), relative to the project
   // root, so this is already absolute (or empty) regardless of the running
   // process's working directory.
@@ -61,14 +63,17 @@ function codexDir(): string | undefined {
   return dir || undefined
 }
 
-// Exposed so codexWriteBack.ts writes to the exact same directory this
-// module reads from, without duplicating the runtimeConfig lookup.
-export function getCodexDir(): string | undefined {
-  return codexDir()
-}
-
 function entryKey(entry: Pick<CodexEntry, 'category' | 'slug'>): string {
   return `${entry.category}/${entry.slug}`
+}
+
+// One-time migration shim: entries cached before the source-tagged
+// canonical/generated split was removed are keyed `canonical:x/y` or
+// `generated:x/y`. Checking those alongside the current key means an
+// existing .data/db/codex-embeddings.json survives that migration without
+// forcing a full re-embed of the whole codex on the next load.
+function lookupCached(cached: Record<string, CachedEmbedding>, key: string): CachedEmbedding | undefined {
+  return cached[key] ?? cached[`canonical:${key}`] ?? cached[`generated:${key}`]
 }
 
 function hashFor(model: string, raw: string): string {
@@ -101,8 +106,11 @@ function parseEntry(category: string, slug: string, text: string): CodexEntry | 
 }
 
 // Every codex/<category>/<slug>.md, parsed. Malformed files (no leading
-// "# Name" heading) are skipped rather than failing the whole load.
+// "# Name" heading) are skipped rather than failing the whole load. Safe to
+// call with a nonexistent `dir` (returns []) — callers don't need to
+// pre-check existsSync themselves.
 function readCodexFiles(dir: string): Array<{ entry: CodexEntry; raw: string }> {
+  if (!existsSync(dir)) return []
   const results: Array<{ entry: CodexEntry; raw: string }> = []
   for (const categoryDirent of readdirSync(dir, { withFileTypes: true })) {
     if (!categoryDirent.isDirectory()) continue
@@ -140,7 +148,15 @@ function cosineSimilarity(a: number[], b: number[]): number {
 // load.
 async function loadCodex(): Promise<CodexCache> {
   const dir = codexDir()
-  if (!dir || !existsSync(dir)) return { entries: [], vectors: new Map() }
+  // Unconfigured is intentional and permanent until an env change — fine to
+  // memoize. A configured-but-not-yet-existing directory (e.g. a slow-to-
+  // mount path, or the sibling project hasn't been set up yet) is more
+  // likely transient, so it throws instead, which getCache() below treats
+  // as retry-next-call rather than caching an empty result forever.
+  if (!dir) return { entries: [], vectors: new Map() }
+  if (!existsSync(dir)) {
+    throw new Error(`CODEX_DIR is configured (${dir}) but that directory does not exist`)
+  }
 
   const model = useRuntimeConfig().embeddingModel as string
   const found = readCodexFiles(dir)
@@ -153,7 +169,7 @@ async function loadCodex(): Promise<CodexCache> {
   for (const { entry, raw } of found) {
     const key = entryKey(entry)
     const hash = hashFor(model, raw)
-    const existing = cached[key]
+    const existing = lookupCached(cached, key)
     if (existing && existing.hash === hash) {
       vectors.set(key, existing.vector)
       nextCached[key] = existing

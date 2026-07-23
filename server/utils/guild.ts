@@ -89,13 +89,21 @@ export async function runGuildResolution(): Promise<GuildRunResult> {
       // Best-effort write-back into the codex, isolated in its own
       // try/catch: the chronicle above is already the durable record of
       // what happened, so a failure here must never undo or misreport it.
+      // The outcome is recorded on the todo afterward (its own best-effort
+      // write) since chronicle.json is appended unconditionally above and
+      // can't otherwise say whether this actually produced a codex file.
+      let codexEntryWritten = false
       try {
         const codexCategory = codexCategoryFor(todo.category)
         const sourceText = `${todo.title}\n${resultDetail}\n${dispatch}`
         const { description, history, location } = await generateCodexEntry(resultName, codexCategory, sourceText)
-        await writeCodexEntry({ category: todo.category, resultName, description, history, location })
+        codexEntryWritten = await writeCodexEntry({ codexCategory, resultName, description, history, location })
       } catch (err) {
         console.warn(`[guild] codex write-back failed for todo ${todo.id}, chronicle was still recorded`, err)
+      }
+      const codexUpdate = await updateTodo(todo.id, { codexEntryWritten }, updated.version)
+      if (!codexUpdate) {
+        console.warn(`[guild] recorded write-back result for todo ${todo.id} but it changed concurrently; not applied`)
       }
     } catch (err) {
       console.error(`[guild] chronicle generation failed for todo ${todo.id}`, err)
