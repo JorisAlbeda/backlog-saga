@@ -3,7 +3,7 @@ import { generateSubtype, generateChronicle, generateCodexEntry, isOllamaReachab
 import { appendWorldMaterial } from './worldMaterial'
 import { getFaction } from '../../shared/factions'
 import { getCodexStatus, type CodexStatus } from './codex'
-import { writeGeneratedCodexEntry, codexCategoryFor } from './generatedCodex'
+import { writeCodexEntry, codexCategoryFor } from './codexWriteBack'
 
 export interface GuildRunResult {
   reachable: boolean
@@ -93,7 +93,7 @@ export async function runGuildResolution(): Promise<GuildRunResult> {
         const codexCategory = codexCategoryFor(todo.category)
         const sourceText = `${todo.title}\n${resultDetail}\n${dispatch}`
         const { description, history, location } = await generateCodexEntry(resultName, codexCategory, sourceText)
-        await writeGeneratedCodexEntry({ todoId: todo.id, category: todo.category, resultName, description, history, location })
+        await writeCodexEntry({ category: todo.category, resultName, description, history, location })
       } catch (err) {
         console.warn(`[guild] codex write-back failed for todo ${todo.id}, chronicle was still recorded`, err)
       }

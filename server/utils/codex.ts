@@ -3,8 +3,6 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { embedText } from './embeddings'
 
-export type CodexSource = 'canonical' | 'generated'
-
 export interface CodexEntry {
   name: string
   slug: string
@@ -12,7 +10,6 @@ export interface CodexEntry {
   description: string
   history: string
   location: string
-  source: CodexSource
 }
 
 interface CachedEmbedding {
@@ -36,7 +33,7 @@ interface CodexCache {
 }
 
 // One memoized promise for "the loaded codex." A clean resolution (even an
-// empty one, e.g. neither directory has anything yet) stays cached for the
+// empty one, e.g. codex grounding unconfigured) stays cached for the
 // process's life. An unexpected *failure* to load (a transient fs error, a
 // corrupted cache file, etc.) resets this to undefined instead, so the next
 // call retries rather than being stuck on an empty result until a restart.
@@ -48,17 +45,14 @@ const queryEmbeddingCache = new Map<string, number[]>()
 export interface CodexStatus {
   configured: boolean
   entityCount: number
-  canonicalCount: number
-  generatedCount: number
   lastError?: string
 }
 
-// Where backlog-saga writes its own newly-generated entries (see
-// generatedCodex.ts) — inside this project, not the sibling `rag` repo, so
-// it never touches a git working tree it doesn't own. Loaded here too so
-// generated entries are grounded against exactly like canonical ones.
-const GENERATED_CODEX_DIR = resolve(process.cwd(), 'generated-codex')
-
+// The codex is one shared resource: the sibling `rag` project's
+// catalogue.ts populates it from actual play, and Backlog Saga both reads
+// it for grounding and writes newly-generated entries directly into it (see
+// codexWriteBack.ts) — all writers share the same directory, the same
+// single source of truth, rather than each keeping a private supplement.
 function codexDir(): string | undefined {
   // Resolved once at config time (nuxt.config.ts), relative to the project
   // root, so this is already absolute (or empty) regardless of the running
@@ -67,15 +61,21 @@ function codexDir(): string | undefined {
   return dir || undefined
 }
 
-function entryKey(entry: Pick<CodexEntry, 'source' | 'category' | 'slug'>): string {
-  return `${entry.source}:${entry.category}/${entry.slug}`
+// Exposed so codexWriteBack.ts writes to the exact same directory this
+// module reads from, without duplicating the runtimeConfig lookup.
+export function getCodexDir(): string | undefined {
+  return codexDir()
+}
+
+function entryKey(entry: Pick<CodexEntry, 'category' | 'slug'>): string {
+  return `${entry.category}/${entry.slug}`
 }
 
 function hashFor(model: string, raw: string): string {
   return createHash('sha256').update(model).update('\n').update(raw).digest('hex')
 }
 
-function parseEntry(source: CodexSource, category: string, slug: string, text: string): CodexEntry | null {
+function parseEntry(category: string, slug: string, text: string): CodexEntry | null {
   const nameMatch = text.match(/^#\s+(.+)$/m)
   if (!nameMatch) return null
   const section = (heading: string) => {
@@ -88,25 +88,21 @@ function parseEntry(source: CodexSource, category: string, slug: string, text: s
     category,
     description: section('Description'),
     history: section('History'),
-    location: section('Location'),
-    source
+    location: section('Location')
   }
-  // The writer of this format (rag's catalogue.ts for canonical entries,
-  // generatedCodex.ts for our own) always fills these two sections — an
-  // empty one here most likely means the markdown shape drifted (a renamed
-  // heading), not that the entry is legitimately blank.
+  // Every writer of this format (rag's catalogue.ts, Backlog Saga's
+  // codexWriteBack.ts) always fills these two sections — an empty one here
+  // most likely means the markdown shape drifted (a renamed heading), not
+  // that the entry is legitimately blank.
   if (!entry.description || !entry.history) {
-    console.warn(`[codex] ${source}:${category}/${slug} is missing an expected Description/History section — the codex markdown format may have changed`)
+    console.warn(`[codex] ${category}/${slug} is missing an expected Description/History section — the codex markdown format may have changed`)
   }
   return entry
 }
 
-// Every <dir>/<category>/<slug>.md, parsed. Malformed files (no leading
-// "# Name" heading) are skipped rather than failing the whole load. Returns
-// [] if `dir` doesn't exist rather than throwing — both the canonical and
-// generated directories are optional.
-function readCodexFiles(dir: string, source: CodexSource): Array<{ entry: CodexEntry; raw: string }> {
-  if (!existsSync(dir)) return []
+// Every codex/<category>/<slug>.md, parsed. Malformed files (no leading
+// "# Name" heading) are skipped rather than failing the whole load.
+function readCodexFiles(dir: string): Array<{ entry: CodexEntry; raw: string }> {
   const results: Array<{ entry: CodexEntry; raw: string }> = []
   for (const categoryDirent of readdirSync(dir, { withFileTypes: true })) {
     if (!categoryDirent.isDirectory()) continue
@@ -115,7 +111,7 @@ function readCodexFiles(dir: string, source: CodexSource): Array<{ entry: CodexE
       if (!fileDirent.isFile() || !fileDirent.name.endsWith('.md')) continue
       const raw = readFileSync(resolve(categoryPath, fileDirent.name), 'utf-8')
       const slug = fileDirent.name.slice(0, -3)
-      const entry = parseEntry(source, categoryDirent.name, slug, raw)
+      const entry = parseEntry(categoryDirent.name, slug, raw)
       if (entry) results.push({ entry, raw })
     }
   }
@@ -137,20 +133,17 @@ function cosineSimilarity(a: number[], b: number[]): number {
 
 // Embeds only entries whose (model, content) hash changed since the last
 // run (new/edited codex files, a switched embedding model, or a freshly
-// written generated entry); everything else reuses its cached vector from
+// written entry); everything else reuses its cached vector from
 // .data/db/codex-embeddings.json. A per-entry embed failure drops just that
 // entry from semantic retrieval — name/location listing, which doesn't need
 // vectors, still works — and isn't persisted, so it's retried on the next
-// load. Reads the canonical `rag/codex` (if configured) and backlog-saga's
-// own generated-codex, and merges both into one cache — a generated entry
-// is grounded against exactly like a canonical one.
+// load.
 async function loadCodex(): Promise<CodexCache> {
+  const dir = codexDir()
+  if (!dir || !existsSync(dir)) return { entries: [], vectors: new Map() }
+
   const model = useRuntimeConfig().embeddingModel as string
-  const canonicalDir = codexDir()
-  const found = [
-    ...(canonicalDir ? readCodexFiles(canonicalDir, 'canonical') : []),
-    ...readCodexFiles(GENERATED_CODEX_DIR, 'generated')
-  ]
+  const found = readCodexFiles(dir)
   const storage = useStorage('data')
   const cached = (await storage.getItem<Record<string, CachedEmbedding>>(EMBEDDINGS_KEY)) ?? {}
   const nextCached: Record<string, CachedEmbedding> = {}
@@ -201,7 +194,7 @@ async function getCache(): Promise<CodexCache> {
   return cachePromise
 }
 
-// Called by generatedCodex.ts right after it writes a new entry, so it's
+// Called by codexWriteBack.ts right after it writes a new entry, so it's
 // picked up by grounding within the same process — otherwise the memoized
 // cache would keep serving the pre-write snapshot until a restart.
 export function invalidateCodexCache(): void {
@@ -255,8 +248,6 @@ export async function getCodexStatus(): Promise<CodexStatus> {
   return {
     configured: Boolean(codexDir()),
     entityCount: c.entries.length,
-    canonicalCount: c.entries.filter((e) => e.source === 'canonical').length,
-    generatedCount: c.entries.filter((e) => e.source === 'generated').length,
     ...(lastError ? { lastError } : {})
   }
 }
