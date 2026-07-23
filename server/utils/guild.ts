@@ -1,8 +1,9 @@
 import { appendChronicleEntry, listTodos, updateTodo } from './store'
-import { generateSubtype, generateChronicle, isOllamaReachable } from './ollama'
+import { generateSubtype, generateChronicle, generateCodexEntry, isOllamaReachable } from './ollama'
 import { appendWorldMaterial } from './worldMaterial'
 import { getFaction } from '../../shared/factions'
 import { getCodexStatus, type CodexStatus } from './codex'
+import { writeGeneratedCodexEntry, codexCategoryFor } from './generatedCodex'
 
 export interface GuildRunResult {
   reachable: boolean
@@ -84,6 +85,18 @@ export async function runGuildResolution(): Promise<GuildRunResult> {
         continue
       }
       chronicled++
+
+      // Best-effort write-back into the codex, isolated in its own
+      // try/catch: the chronicle above is already the durable record of
+      // what happened, so a failure here must never undo or misreport it.
+      try {
+        const codexCategory = codexCategoryFor(todo.category)
+        const sourceText = `${todo.title}\n${resultDetail}\n${dispatch}`
+        const { description, history, location } = await generateCodexEntry(resultName, codexCategory, sourceText)
+        await writeGeneratedCodexEntry({ todoId: todo.id, category: todo.category, resultName, description, history, location })
+      } catch (err) {
+        console.warn(`[guild] codex write-back failed for todo ${todo.id}, chronicle was still recorded`, err)
+      }
     } catch (err) {
       console.error(`[guild] chronicle generation failed for todo ${todo.id}`, err)
     }

@@ -1,6 +1,6 @@
 import type { Category } from '../../shared/types'
 import { FACTIONS } from '../../shared/factions'
-import { getWorldCanonContext } from './codex'
+import { getWorldCanonContext, getLocationNames } from './codex'
 
 interface SubtypeResult {
   subtype: string
@@ -10,6 +10,12 @@ interface ChronicleResult {
   resultName: string
   resultDetail: string
   dispatch: string
+}
+
+interface CodexEntryResult {
+  description: string
+  history: string
+  location: string
 }
 
 function ollamaConfig() {
@@ -135,4 +141,52 @@ export async function generateChronicle(title: string, category: Category, subty
     throw new Error(`generateChronicle: model response missing a usable resultName/resultDetail/dispatch string for category ${category}`)
   }
   return result
+}
+
+// Modeled directly on the sibling `rag` project's own catalogue.ts
+// entryPrompt/locationRule, which is proven to work well on this same model
+// — a neutral archival voice and a constrained location field, not the
+// faction's in-character register generateChronicle uses. `sourceText` is
+// the material already invented (title/resultDetail/dispatch), so this adds
+// no new facts, just reshapes them into the codex's own format.
+function codexEntryPrompt(name: string, codexCategory: string, sourceText: string, candidateLocations: string[]): string {
+  const kind = codexCategory.slice(0, -1)
+  const locationRule =
+    candidateLocations.length > 0
+      ? `Choose exactly one name from this list, copied verbatim: ${candidateLocations.join(', ')}. If none of them clearly apply, use "Unknown".`
+      : `No locations have been catalogued yet, so use "Unknown".`
+
+  return `Write a codex entry for the ${kind} "${name}", using only the material below.
+Do not invent details that aren't supported by it.
+Write the "description" and "history" entirely in past tense, in a neutral chronicler's voice, not the in-character voice of the material below.
+
+Respond with ONLY a JSON object in this exact shape, with no extra commentary:
+{"description": string, "history": string, "location": string}
+
+- "description": about three sentences, in past tense, describing what "${name}" was.
+- "history": about three sentences, in past tense, covering how it came to be, as described in the material.
+- "location": the location most associated with "${name}". ${locationRule}
+
+MATERIAL:
+${sourceText}`
+}
+
+function normalizeLocation(raw: string, candidateLocations: string[]): string {
+  const match = candidateLocations.find((name) => name.toLowerCase() === raw.trim().toLowerCase())
+  return match ?? 'Unknown'
+}
+
+export async function generateCodexEntry(name: string, codexCategory: string, sourceText: string): Promise<CodexEntryResult> {
+  const candidateLocations = await getLocationNames()
+  const result = await chatJSON<Partial<CodexEntryResult>>(
+    'You are a neutral chronicler cataloguing a fantasy world\'s codex. Respond ONLY with strict JSON, no commentary, no markdown fences.',
+    codexEntryPrompt(name, codexCategory, sourceText, candidateLocations)
+  )
+  const description = typeof result?.description === 'string' ? result.description.trim() : ''
+  const history = typeof result?.history === 'string' ? result.history.trim() : ''
+  if (!description || !history) {
+    throw new Error(`generateCodexEntry: model response missing a usable description/history for "${name}"`)
+  }
+  const location = normalizeLocation(typeof result?.location === 'string' ? result.location : '', candidateLocations)
+  return { description, history, location }
 }

@@ -3,6 +3,8 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { embedText } from './embeddings'
 
+export type CodexSource = 'canonical' | 'generated'
+
 export interface CodexEntry {
   name: string
   slug: string
@@ -10,6 +12,7 @@ export interface CodexEntry {
   description: string
   history: string
   location: string
+  source: CodexSource
 }
 
 interface CachedEmbedding {
@@ -32,14 +35,12 @@ interface CodexCache {
   vectors: Map<string, number[]>
 }
 
-// One memoized promise for "the loaded codex, if any." A result that
-// resolves cleanly (including a clean `null` from loadCodex's own
-// missing/misconfigured-directory check) stays cached for the process's
-// life — fixing that requires an env change and a restart anyway. An
-// unexpected *failure* to load (a transient fs error, a corrupted cache
-// file, etc.) resets this to undefined instead, so the next call retries
-// rather than being stuck disabled until a restart.
-let cachePromise: Promise<CodexCache | null> | undefined
+// One memoized promise for "the loaded codex." A clean resolution (even an
+// empty one, e.g. neither directory has anything yet) stays cached for the
+// process's life. An unexpected *failure* to load (a transient fs error, a
+// corrupted cache file, etc.) resets this to undefined instead, so the next
+// call retries rather than being stuck on an empty result until a restart.
+let cachePromise: Promise<CodexCache> | undefined
 let lastError: string | undefined
 
 const queryEmbeddingCache = new Map<string, number[]>()
@@ -47,8 +48,16 @@ const queryEmbeddingCache = new Map<string, number[]>()
 export interface CodexStatus {
   configured: boolean
   entityCount: number
+  canonicalCount: number
+  generatedCount: number
   lastError?: string
 }
+
+// Where backlog-saga writes its own newly-generated entries (see
+// generatedCodex.ts) — inside this project, not the sibling `rag` repo, so
+// it never touches a git working tree it doesn't own. Loaded here too so
+// generated entries are grounded against exactly like canonical ones.
+const GENERATED_CODEX_DIR = resolve(process.cwd(), 'generated-codex')
 
 function codexDir(): string | undefined {
   // Resolved once at config time (nuxt.config.ts), relative to the project
@@ -58,15 +67,15 @@ function codexDir(): string | undefined {
   return dir || undefined
 }
 
-function entryKey(entry: Pick<CodexEntry, 'category' | 'slug'>): string {
-  return `${entry.category}/${entry.slug}`
+function entryKey(entry: Pick<CodexEntry, 'source' | 'category' | 'slug'>): string {
+  return `${entry.source}:${entry.category}/${entry.slug}`
 }
 
 function hashFor(model: string, raw: string): string {
   return createHash('sha256').update(model).update('\n').update(raw).digest('hex')
 }
 
-function parseEntry(category: string, slug: string, text: string): CodexEntry | null {
+function parseEntry(source: CodexSource, category: string, slug: string, text: string): CodexEntry | null {
   const nameMatch = text.match(/^#\s+(.+)$/m)
   if (!nameMatch) return null
   const section = (heading: string) => {
@@ -79,21 +88,25 @@ function parseEntry(category: string, slug: string, text: string): CodexEntry | 
     category,
     description: section('Description'),
     history: section('History'),
-    location: section('Location')
+    location: section('Location'),
+    source
   }
-  // The sibling `rag` project's catalogue.ts is the sole writer of this
-  // format and always fills these two sections — an empty one here most
-  // likely means that project's markdown shape drifted (a renamed heading),
-  // not that the entry is legitimately blank.
+  // The writer of this format (rag's catalogue.ts for canonical entries,
+  // generatedCodex.ts for our own) always fills these two sections — an
+  // empty one here most likely means the markdown shape drifted (a renamed
+  // heading), not that the entry is legitimately blank.
   if (!entry.description || !entry.history) {
-    console.warn(`[codex] ${category}/${slug} is missing an expected Description/History section — the codex markdown format may have changed`)
+    console.warn(`[codex] ${source}:${category}/${slug} is missing an expected Description/History section — the codex markdown format may have changed`)
   }
   return entry
 }
 
-// Every codex/<category>/<slug>.md, parsed. Malformed files (no leading
-// "# Name" heading) are skipped rather than failing the whole load.
-function readCodexFiles(dir: string): Array<{ entry: CodexEntry; raw: string }> {
+// Every <dir>/<category>/<slug>.md, parsed. Malformed files (no leading
+// "# Name" heading) are skipped rather than failing the whole load. Returns
+// [] if `dir` doesn't exist rather than throwing — both the canonical and
+// generated directories are optional.
+function readCodexFiles(dir: string, source: CodexSource): Array<{ entry: CodexEntry; raw: string }> {
+  if (!existsSync(dir)) return []
   const results: Array<{ entry: CodexEntry; raw: string }> = []
   for (const categoryDirent of readdirSync(dir, { withFileTypes: true })) {
     if (!categoryDirent.isDirectory()) continue
@@ -102,7 +115,7 @@ function readCodexFiles(dir: string): Array<{ entry: CodexEntry; raw: string }> 
       if (!fileDirent.isFile() || !fileDirent.name.endsWith('.md')) continue
       const raw = readFileSync(resolve(categoryPath, fileDirent.name), 'utf-8')
       const slug = fileDirent.name.slice(0, -3)
-      const entry = parseEntry(categoryDirent.name, slug, raw)
+      const entry = parseEntry(source, categoryDirent.name, slug, raw)
       if (entry) results.push({ entry, raw })
     }
   }
@@ -123,17 +136,21 @@ function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 // Embeds only entries whose (model, content) hash changed since the last
-// run (new/edited codex files, or a switched embedding model); everything
-// else reuses its cached vector from .data/db/codex-embeddings.json. A
-// per-entry embed failure drops just that entry from semantic retrieval —
-// name/location listing, which doesn't need vectors, still works — and
-// isn't persisted, so it's retried on the next load.
-async function loadCodex(): Promise<CodexCache | null> {
-  const dir = codexDir()
-  if (!dir || !existsSync(dir)) return null
-
+// run (new/edited codex files, a switched embedding model, or a freshly
+// written generated entry); everything else reuses its cached vector from
+// .data/db/codex-embeddings.json. A per-entry embed failure drops just that
+// entry from semantic retrieval — name/location listing, which doesn't need
+// vectors, still works — and isn't persisted, so it's retried on the next
+// load. Reads the canonical `rag/codex` (if configured) and backlog-saga's
+// own generated-codex, and merges both into one cache — a generated entry
+// is grounded against exactly like a canonical one.
+async function loadCodex(): Promise<CodexCache> {
   const model = useRuntimeConfig().embeddingModel as string
-  const found = readCodexFiles(dir)
+  const canonicalDir = codexDir()
+  const found = [
+    ...(canonicalDir ? readCodexFiles(canonicalDir, 'canonical') : []),
+    ...readCodexFiles(GENERATED_CODEX_DIR, 'generated')
+  ]
   const storage = useStorage('data')
   const cached = (await storage.getItem<Record<string, CachedEmbedding>>(EMBEDDINGS_KEY)) ?? {}
   const nextCached: Record<string, CachedEmbedding> = {}
@@ -172,16 +189,33 @@ async function loadCodex(): Promise<CodexCache | null> {
   return { entries: found.map((f) => f.entry), vectors }
 }
 
-async function getCache(): Promise<CodexCache | null> {
+async function getCache(): Promise<CodexCache> {
   if (!cachePromise) {
     cachePromise = loadCodex().catch((err) => {
       lastError = err instanceof Error ? err.message : String(err)
       console.warn('[codex] failed to load the world codex this attempt, will retry on next use', err)
       cachePromise = undefined
-      return null
+      return { entries: [], vectors: new Map<string, number[]>() }
     })
   }
   return cachePromise
+}
+
+// Called by generatedCodex.ts right after it writes a new entry, so it's
+// picked up by grounding within the same process — otherwise the memoized
+// cache would keep serving the pre-write snapshot until a restart.
+export function invalidateCodexCache(): void {
+  cachePromise = undefined
+}
+
+export async function getExistingSlugs(category: string): Promise<Set<string>> {
+  const c = await getCache()
+  return new Set(c.entries.filter((e) => e.category === category).map((e) => e.slug))
+}
+
+export async function getLocationNames(): Promise<string[]> {
+  const c = await getCache()
+  return locationsFrom(c).map((l) => l.name)
 }
 
 async function embedQueryCached(query: string): Promise<number[]> {
@@ -220,7 +254,9 @@ export async function getCodexStatus(): Promise<CodexStatus> {
   const c = await getCache()
   return {
     configured: Boolean(codexDir()),
-    entityCount: c ? c.entries.length : 0,
+    entityCount: c.entries.length,
+    canonicalCount: c.entries.filter((e) => e.source === 'canonical').length,
+    generatedCount: c.entries.filter((e) => e.source === 'generated').length,
     ...(lastError ? { lastError } : {})
   }
 }
@@ -231,7 +267,7 @@ export async function getCodexStatus(): Promise<CodexStatus> {
 export async function getWorldCanonContext(query: string): Promise<string> {
   try {
     const c = await getCache()
-    if (!c || c.entries.length === 0) return ''
+    if (c.entries.length === 0) return ''
 
     const names = namesFrom(c)
     const locations = locationsFrom(c)
