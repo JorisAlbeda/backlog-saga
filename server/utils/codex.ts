@@ -289,17 +289,23 @@ export async function getWorldCanonContext(query: string): Promise<string> {
 
     if (names.length === 0 && locations.length === 0 && relevant.length === 0) return ''
 
+    // Deliberately NOT a full dump of every entity: the shared codex now
+    // grows from three writers (rag's catalogue.ts, Backlog Saga's own
+    // write-back, and eventually Oath Simulator) with no upper bound, and a
+    // prompt whose size scales with total codex size eventually pushes a
+    // local model's response past chatJSON's timeout. Locations are listed
+    // by name only (no descriptions); full descriptions are reserved for
+    // `relevant`, which is bounded to a fixed top-k via semantic search. An
+    // exact-name collision is still caught deterministically at write time
+    // by codexWriteBack.ts regardless of what's included here.
     const sections: string[] = []
     if (locations.length > 0) {
-      sections.push(`Known locations in this world:\n${locations.map((l) => `- ${l.name}: ${l.description}`).join('\n')}`)
+      sections.push(`Known locations in this world: ${locations.map((l) => l.name).join(', ')}`)
     }
     if (relevant.length > 0) {
       sections.push(
         `Existing canon most relevant to this task:\n${relevant.map((e) => `- ${e.name} (${e.category}): ${e.description}`).join('\n')}`
       )
-    }
-    if (names.length > 0) {
-      sections.push(`All existing named entities, for reference: ${names.join(', ')}`)
     }
 
     return `\n\nEXISTING WORLD CANON — treat everything below as established fact from prior play, for context only. Do not copy this text verbatim, and do not invent a name that duplicates or contradicts it. Where it fits naturally, tie your invention to an existing location rather than a new one.\n${sections.join(

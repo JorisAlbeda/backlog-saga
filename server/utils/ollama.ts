@@ -43,7 +43,7 @@ async function chatJSON<T>(system: string, prompt: string): Promise<T> {
   const { url, model } = ollamaConfig()
   const response = await $fetch<{ message: { content: string } }>(`${url}/api/chat`, {
     method: 'POST',
-    timeout: 30000,
+    timeout: 60000,
     body: {
       model,
       think: false,
