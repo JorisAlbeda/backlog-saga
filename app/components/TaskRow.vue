@@ -9,6 +9,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   complete: [Todo]
+  inspect: [Todo]
   open: [Todo]
   edit: [Todo]
   remove: [Todo]
@@ -17,7 +18,6 @@ const emit = defineEmits<{
 const state = computed(() => getTaskState(props.todo))
 const statusText = computed(() => currentGuildText(props.todo))
 const faction = computed(() => getFaction(props.todo.category))
-const interactive = computed(() => state.value === 'todo' || state.value === 'done')
 
 const glyphState = computed(() => {
   if (state.value === 'todo') return 'empty'
@@ -25,8 +25,12 @@ const glyphState = computed(() => {
   return 'done'
 })
 
-const ariaLabel = computed(() => {
-  if (state.value === 'todo') return `${props.todo.title}, to do`
+// 'done' rows keep the old whole-row tap target (opens the dispatch). For
+// 'todo' rows, a single tap-anywhere target used to mark the task complete
+// on the very first tap a user made to glance at a truncated title — the
+// checkbox and the body are now separate targets so viewing details never
+// completes the task by accident.
+const rowAriaLabel = computed(() => {
   if (state.value === 'taking-shape') return `${props.todo.title}, taking shape — ${statusText.value}`
   return `${props.todo.title}, done — ${props.todo.resultName ?? faction.value.noun} ${faction.value.doneVerb.toLowerCase()}`
 })
@@ -50,16 +54,27 @@ const lastSyncedLabel = computed(() => {
   return `Checked ${minutes}m ago`
 })
 
-function onActivate() {
-  if (state.value === 'todo') emit('complete', props.todo)
-  else if (state.value === 'done') emit('open', props.todo)
+function onRowActivate() {
+  if (state.value === 'done') emit('open', props.todo)
 }
 
-function onKeydown(e: KeyboardEvent) {
-  if (!interactive.value) return
+function onRowKeydown(e: KeyboardEvent) {
+  if (state.value !== 'done') return
   if (e.key === 'Enter' || e.key === ' ') {
     e.preventDefault()
-    onActivate()
+    onRowActivate()
+  }
+}
+
+function onBodyActivate() {
+  if (state.value === 'todo') emit('inspect', props.todo)
+}
+
+function onBodyKeydown(e: KeyboardEvent) {
+  if (state.value !== 'todo') return
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault()
+    onBodyActivate()
   }
 }
 </script>
@@ -68,15 +83,31 @@ function onKeydown(e: KeyboardEvent) {
   <div
     class="task-row"
     :class="`task-row--${state}`"
-    :role="interactive ? 'button' : undefined"
-    :tabindex="interactive ? 0 : undefined"
-    :aria-label="ariaLabel"
-    @click="interactive && onActivate()"
-    @keydown="onKeydown"
+    :role="state === 'done' ? 'button' : undefined"
+    :tabindex="state === 'done' ? 0 : undefined"
+    :aria-label="state === 'done' ? rowAriaLabel : undefined"
+    @click="state === 'done' && onRowActivate()"
+    @keydown="onRowKeydown"
   >
-    <CheckboxGlyph :state="glyphState" />
+    <button
+      v-if="state === 'todo'"
+      type="button"
+      class="task-row__checkbox-btn"
+      :aria-label="`Mark '${todo.title}' as done`"
+      @click.stop="emit('complete', todo)"
+    >
+      <CheckboxGlyph :state="glyphState" />
+    </button>
+    <CheckboxGlyph v-else :state="glyphState" />
 
-    <div class="task-row__body">
+    <div
+      class="task-row__body"
+      :role="state === 'todo' ? 'button' : undefined"
+      :tabindex="state === 'todo' ? 0 : undefined"
+      :aria-label="state === 'todo' ? `${todo.title}, view details` : undefined"
+      @click="state === 'todo' && onBodyActivate()"
+      @keydown="onBodyKeydown"
+    >
       <p class="task-row__title">{{ todo.title }}</p>
 
       <p v-if="state === 'taking-shape'" class="task-row__status">{{ statusText }}</p>
@@ -170,9 +201,41 @@ function onKeydown(e: KeyboardEvent) {
   outline-offset: 2px;
 }
 
+.task-row__checkbox-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 8px;
+  margin: -8px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.task-row__checkbox-btn:hover {
+  background: var(--color-bg-base);
+}
+
+.task-row__checkbox-btn:focus-visible {
+  outline: 2px solid var(--color-cta-primary);
+  outline-offset: 2px;
+}
+
 .task-row__body {
   min-width: 0;
   flex: 1;
+}
+
+.task-row__body[role='button'] {
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.task-row__body[role='button']:focus-visible {
+  outline: 2px solid var(--color-cta-primary);
+  outline-offset: 2px;
 }
 
 .task-row__title {

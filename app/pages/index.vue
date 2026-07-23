@@ -49,6 +49,7 @@ const groupedTodos = computed(() => {
 const showAddOverlay = ref(false)
 const editingTodo = ref<Todo | null>(null)
 const completingTodo = ref<Todo | null>(null)
+const inspectingTodo = ref<Todo | null>(null)
 
 async function handleAddSubmit({
   title,
@@ -90,6 +91,10 @@ async function handleComplete(todo: Todo) {
 function goToDispatch(todo: Todo) {
   navigateTo(`/dispatch/${todo.id}`)
 }
+
+function inspectTodo(todo: Todo) {
+  inspectingTodo.value = todo
+}
 </script>
 
 <template>
@@ -114,6 +119,7 @@ function goToDispatch(todo: Todo) {
               :todo="todo"
               :last-synced-at="lastSyncedAt"
               @complete="handleComplete"
+              @inspect="inspectTodo"
               @open="goToDispatch"
               @edit="openEdit"
               @remove="handleRemove"
@@ -145,6 +151,12 @@ function goToDispatch(todo: Todo) {
       v-if="completingTodo"
       :todo="completingTodo"
       @dismiss="completingTodo = null"
+    />
+
+    <TaskDetailOverlay
+      v-if="inspectingTodo"
+      :todo="inspectingTodo"
+      @dismiss="inspectingTodo = null"
     />
   </div>
 </template>
