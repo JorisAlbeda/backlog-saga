@@ -10,8 +10,8 @@ defineProps<{
       <rect x="1.5" y="1.5" width="17" height="17" rx="3" fill="none" stroke="var(--color-text-primary)" stroke-width="1.5" />
     </svg>
     <svg v-else-if="state === 'in-progress'" viewBox="0 0 20 20" width="20" height="20">
-      <circle cx="10" cy="10" r="8.25" fill="none" stroke="var(--color-accent)" stroke-width="1.5" />
-      <circle cx="10" cy="10" r="4" fill="var(--color-accent)" />
+      <rect x="1.5" y="1.5" width="17" height="17" rx="3" fill="none" stroke="var(--color-accent)" stroke-width="1.5" />
+      <circle cx="10" cy="10" r="4.5" fill="var(--color-accent)" />
     </svg>
     <svg v-else viewBox="0 0 20 20" width="20" height="20">
       <rect x="1.5" y="1.5" width="17" height="17" rx="3" fill="var(--color-done-check)" />
