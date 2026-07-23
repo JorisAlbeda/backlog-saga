@@ -2,11 +2,13 @@ import { appendChronicleEntry, listTodos, updateTodo } from './store'
 import { generateSubtype, generateChronicle, isOllamaReachable } from './ollama'
 import { appendWorldMaterial } from './worldMaterial'
 import { getFaction } from '../../shared/factions'
+import { getCodexStatus, type CodexStatus } from './codex'
 
 export interface GuildRunResult {
   reachable: boolean
   drafted: number
   chronicled: number
+  codex: CodexStatus
 }
 
 // Advances guildStatus for pending/completed todos when Ollama is reachable.
@@ -14,8 +16,9 @@ export interface GuildRunResult {
 // stall the whole run or any other todo's progress.
 export async function runGuildResolution(): Promise<GuildRunResult> {
   const reachable = await isOllamaReachable()
+  const codex = await getCodexStatus()
   if (!reachable) {
-    return { reachable: false, drafted: 0, chronicled: 0 }
+    return { reachable: false, drafted: 0, chronicled: 0, codex }
   }
 
   let drafted = 0
@@ -86,5 +89,5 @@ export async function runGuildResolution(): Promise<GuildRunResult> {
     }
   }
 
-  return { reachable: true, drafted, chronicled }
+  return { reachable: true, drafted, chronicled, codex }
 }

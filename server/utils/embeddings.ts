@@ -9,5 +9,8 @@ export async function embedText(text: string): Promise<number[]> {
     timeout: 15000,
     body: { model, prompt: text }
   })
+  if (!Array.isArray(response?.embedding) || response.embedding.length === 0) {
+    throw new Error('embedText: Ollama response did not include a usable "embedding" array')
+  }
   return response.embedding
 }

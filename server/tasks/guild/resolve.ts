@@ -7,10 +7,13 @@ export default defineTask({
   },
   async run() {
     const result = await runGuildResolution()
+    const codexNote = !result.codex.configured
+      ? 'codex=disabled'
+      : `codex=${result.codex.entityCount}${result.codex.lastError ? ` (last error: ${result.codex.lastError})` : ''}`
     if (!result.reachable) {
-      console.log('[guild:resolve] Ollama unreachable, skipped')
+      console.log(`[guild:resolve] Ollama unreachable, skipped (${codexNote})`)
     } else {
-      console.log(`[guild:resolve] drafted=${result.drafted} chronicled=${result.chronicled}`)
+      console.log(`[guild:resolve] drafted=${result.drafted} chronicled=${result.chronicled} ${codexNote}`)
     }
     return { result }
   }

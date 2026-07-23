@@ -101,17 +101,21 @@ function voiceFor(category: Category): string {
   return `You are ${FACTION_VOICES[category].persona}, writing entries for a tabletop RPG chronicle. Respond ONLY with strict JSON, no commentary, no markdown fences.`
 }
 
+// worldCanon (if any) is placed BEFORE the JSON-format instruction — small
+// local models weight prompt-final content most heavily, so the format
+// directive needs to be the last thing the model reads, not buried under a
+// block of reference text it might otherwise echo into the response.
 function subtypePromptFor(category: Category, title: string, worldCanon: string): string {
   const faction = FACTIONS[category]
   const { subtypeVerb, subtypeExamples } = FACTION_VOICES[category]
   const examples = subtypeExamples.map(example => `"${example}"`).join(', ')
-  return `A task has been logged: "${title}". In one short phrase, name the type of ${faction.noun} the ${faction.factionName} would ${subtypeVerb} in tribute to this task (e.g. ${examples}). Respond as JSON: {"subtype": "..."}.${worldCanon}`
+  return `A task has been logged: "${title}". In one short phrase, name the type of ${faction.noun} the ${faction.factionName} would ${subtypeVerb} in tribute to this task (e.g. ${examples}).${worldCanon}\n\nRespond as JSON: {"subtype": "..."}.`
 }
 
 function chroniclePromptFor(category: Category, title: string, subtype: string, worldCanon: string): string {
   const faction = FACTIONS[category]
   const { register } = FACTION_VOICES[category]
-  return `A real-world task was completed: "${title}". The ${faction.factionName} ${faction.doneVerb.toLowerCase()} ${subtype} in tribute to it. Invent a fitting proper name for the ${faction.noun}, its ${faction.detailLabel.toLowerCase()}, and write a short (2-4 sentence) in-character dispatch about it, in a ${register} register. The dispatch should thematically resemble the task without literally repeating its wording. Respond as JSON: {"resultName": "...", "resultDetail": "...", "dispatch": "..."}.${worldCanon}`
+  return `A real-world task was completed: "${title}". The ${faction.factionName} ${faction.doneVerb.toLowerCase()} ${subtype} in tribute to it. Invent a fitting proper name for the ${faction.noun}, its ${faction.detailLabel.toLowerCase()}, and write a short (2-4 sentence) in-character dispatch about it, in a ${register} register. The dispatch should thematically resemble the task without literally repeating its wording.${worldCanon}\n\nRespond as JSON: {"resultName": "...", "resultDetail": "...", "dispatch": "..."}.`
 }
 
 export async function generateSubtype(title: string, category: Category): Promise<SubtypeResult> {
