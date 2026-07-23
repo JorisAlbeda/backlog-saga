@@ -5,7 +5,11 @@ export default defineNuxtConfig({
   css: ['~/assets/tokens.css'],
   runtimeConfig: {
     ollamaBaseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
-    ollamaModel: process.env.OLLAMA_MODEL || 'qwen3:8b'
+    ollamaModel: process.env.OLLAMA_MODEL || 'qwen3:8b',
+    embeddingModel: process.env.EMBEDDING_MODEL || 'nomic-embed-text',
+    // Path to the world codex (the `codex/` folder produced by the sibling
+    // `rag` project's `catalogue.ts`). Empty disables codex grounding.
+    codexDir: process.env.CODEX_DIR || ''
   },
   nitro: {
     experimental: { tasks: true },

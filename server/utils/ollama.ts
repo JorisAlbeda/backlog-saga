@@ -1,5 +1,6 @@
 import type { Category } from '../../shared/types'
 import { FACTIONS } from '../../shared/factions'
+import { getWorldCanonContext } from './codex'
 
 interface SubtypeResult {
   subtype: string
@@ -100,21 +101,22 @@ function voiceFor(category: Category): string {
   return `You are ${FACTION_VOICES[category].persona}, writing entries for a tabletop RPG chronicle. Respond ONLY with strict JSON, no commentary, no markdown fences.`
 }
 
-function subtypePromptFor(category: Category, title: string): string {
+function subtypePromptFor(category: Category, title: string, worldCanon: string): string {
   const faction = FACTIONS[category]
   const { subtypeVerb, subtypeExamples } = FACTION_VOICES[category]
   const examples = subtypeExamples.map(example => `"${example}"`).join(', ')
-  return `A task has been logged: "${title}". In one short phrase, name the type of ${faction.noun} the ${faction.factionName} would ${subtypeVerb} in tribute to this task (e.g. ${examples}). Respond as JSON: {"subtype": "..."}.`
+  return `A task has been logged: "${title}". In one short phrase, name the type of ${faction.noun} the ${faction.factionName} would ${subtypeVerb} in tribute to this task (e.g. ${examples}). Respond as JSON: {"subtype": "..."}.${worldCanon}`
 }
 
-function chroniclePromptFor(category: Category, title: string, subtype: string): string {
+function chroniclePromptFor(category: Category, title: string, subtype: string, worldCanon: string): string {
   const faction = FACTIONS[category]
   const { register } = FACTION_VOICES[category]
-  return `A real-world task was completed: "${title}". The ${faction.factionName} ${faction.doneVerb.toLowerCase()} ${subtype} in tribute to it. Invent a fitting proper name for the ${faction.noun}, its ${faction.detailLabel.toLowerCase()}, and write a short (2-4 sentence) in-character dispatch about it, in a ${register} register. The dispatch should thematically resemble the task without literally repeating its wording. Respond as JSON: {"resultName": "...", "resultDetail": "...", "dispatch": "..."}.`
+  return `A real-world task was completed: "${title}". The ${faction.factionName} ${faction.doneVerb.toLowerCase()} ${subtype} in tribute to it. Invent a fitting proper name for the ${faction.noun}, its ${faction.detailLabel.toLowerCase()}, and write a short (2-4 sentence) in-character dispatch about it, in a ${register} register. The dispatch should thematically resemble the task without literally repeating its wording. Respond as JSON: {"resultName": "...", "resultDetail": "...", "dispatch": "..."}.${worldCanon}`
 }
 
 export async function generateSubtype(title: string, category: Category): Promise<SubtypeResult> {
-  const result = await chatJSON<SubtypeResult>(voiceFor(category), subtypePromptFor(category, title))
+  const worldCanon = await getWorldCanonContext(title)
+  const result = await chatJSON<SubtypeResult>(voiceFor(category), subtypePromptFor(category, title, worldCanon))
   if (typeof result?.subtype !== 'string' || !result.subtype.trim()) {
     throw new Error(`generateSubtype: model response missing a usable "subtype" string for category ${category}`)
   }
@@ -122,7 +124,8 @@ export async function generateSubtype(title: string, category: Category): Promis
 }
 
 export async function generateChronicle(title: string, category: Category, subtype: string): Promise<ChronicleResult> {
-  const result = await chatJSON<ChronicleResult>(voiceFor(category), chroniclePromptFor(category, title, subtype))
+  const worldCanon = await getWorldCanonContext(`${title} ${subtype}`)
+  const result = await chatJSON<ChronicleResult>(voiceFor(category), chroniclePromptFor(category, title, subtype, worldCanon))
   const fields = [result?.resultName, result?.resultDetail, result?.dispatch]
   if (fields.some(f => typeof f !== 'string' || !f.trim())) {
     throw new Error(`generateChronicle: model response missing a usable resultName/resultDetail/dispatch string for category ${category}`)
