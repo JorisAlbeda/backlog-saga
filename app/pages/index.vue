@@ -29,8 +29,8 @@ onUnmounted(() => {
 
 // Grouped by category/faction, in the fixed order factions are declared
 // (not task recency), so sections don't reshuffle as tasks are added or
-// completed. Empty categories are omitted. Tasks within a group keep the
-// original creation-order sort.
+// completed. Empty categories are omitted. Tasks within a group are sorted
+// newest first.
 const groupedTodos = computed(() => {
   const byCategory = new Map<Category, Todo[]>()
   for (const todo of todos.value) {
@@ -41,7 +41,7 @@ const groupedTodos = computed(() => {
   return CATEGORIES.map((category) => ({
     category,
     todos: (byCategory.get(category) ?? []).sort(
-      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     ),
   })).filter((group) => group.todos.length > 0)
 })
