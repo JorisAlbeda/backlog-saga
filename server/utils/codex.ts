@@ -32,14 +32,12 @@ interface CodexCache {
   vectors: Map<string, number[]>
 }
 
-// One memoized promise for "the loaded codex, if any." A result that
-// resolves cleanly (including a clean `null` from loadCodex's own
-// missing/misconfigured-directory check) stays cached for the process's
-// life — fixing that requires an env change and a restart anyway. An
-// unexpected *failure* to load (a transient fs error, a corrupted cache
-// file, etc.) resets this to undefined instead, so the next call retries
-// rather than being stuck disabled until a restart.
-let cachePromise: Promise<CodexCache | null> | undefined
+// One memoized promise for "the loaded codex." A clean resolution (even an
+// empty one, e.g. codex grounding unconfigured) stays cached for the
+// process's life. An unexpected *failure* to load (a transient fs error, a
+// corrupted cache file, etc.) resets this to undefined instead, so the next
+// call retries rather than being stuck on an empty result until a restart.
+let cachePromise: Promise<CodexCache> | undefined
 let lastError: string | undefined
 
 const queryEmbeddingCache = new Map<string, number[]>()
@@ -50,7 +48,14 @@ export interface CodexStatus {
   lastError?: string
 }
 
-function codexDir(): string | undefined {
+// The codex is one shared resource: the sibling `rag` project's
+// catalogue.ts populates it from actual play, and Backlog Saga both reads
+// it for grounding and writes newly-generated entries directly into it (see
+// codexWriteBack.ts) — all writers share the same directory, the same
+// single source of truth, rather than each keeping a private supplement.
+// Exported directly (rather than through a wrapper) so codexWriteBack.ts
+// writes to the exact same directory this module reads from.
+export function codexDir(): string | undefined {
   // Resolved once at config time (nuxt.config.ts), relative to the project
   // root, so this is already absolute (or empty) regardless of the running
   // process's working directory.
@@ -60,6 +65,15 @@ function codexDir(): string | undefined {
 
 function entryKey(entry: Pick<CodexEntry, 'category' | 'slug'>): string {
   return `${entry.category}/${entry.slug}`
+}
+
+// One-time migration shim: entries cached before the source-tagged
+// canonical/generated split was removed are keyed `canonical:x/y` or
+// `generated:x/y`. Checking those alongside the current key means an
+// existing .data/db/codex-embeddings.json survives that migration without
+// forcing a full re-embed of the whole codex on the next load.
+function lookupCached(cached: Record<string, CachedEmbedding>, key: string): CachedEmbedding | undefined {
+  return cached[key] ?? cached[`canonical:${key}`] ?? cached[`generated:${key}`]
 }
 
 function hashFor(model: string, raw: string): string {
@@ -81,10 +95,10 @@ function parseEntry(category: string, slug: string, text: string): CodexEntry | 
     history: section('History'),
     location: section('Location')
   }
-  // The sibling `rag` project's catalogue.ts is the sole writer of this
-  // format and always fills these two sections — an empty one here most
-  // likely means that project's markdown shape drifted (a renamed heading),
-  // not that the entry is legitimately blank.
+  // Every writer of this format (rag's catalogue.ts, Backlog Saga's
+  // codexWriteBack.ts) always fills these two sections — an empty one here
+  // most likely means the markdown shape drifted (a renamed heading), not
+  // that the entry is legitimately blank.
   if (!entry.description || !entry.history) {
     console.warn(`[codex] ${category}/${slug} is missing an expected Description/History section — the codex markdown format may have changed`)
   }
@@ -92,8 +106,11 @@ function parseEntry(category: string, slug: string, text: string): CodexEntry | 
 }
 
 // Every codex/<category>/<slug>.md, parsed. Malformed files (no leading
-// "# Name" heading) are skipped rather than failing the whole load.
+// "# Name" heading) are skipped rather than failing the whole load. Safe to
+// call with a nonexistent `dir` (returns []) — callers don't need to
+// pre-check existsSync themselves.
 function readCodexFiles(dir: string): Array<{ entry: CodexEntry; raw: string }> {
+  if (!existsSync(dir)) return []
   const results: Array<{ entry: CodexEntry; raw: string }> = []
   for (const categoryDirent of readdirSync(dir, { withFileTypes: true })) {
     if (!categoryDirent.isDirectory()) continue
@@ -123,14 +140,23 @@ function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 // Embeds only entries whose (model, content) hash changed since the last
-// run (new/edited codex files, or a switched embedding model); everything
-// else reuses its cached vector from .data/db/codex-embeddings.json. A
-// per-entry embed failure drops just that entry from semantic retrieval —
-// name/location listing, which doesn't need vectors, still works — and
-// isn't persisted, so it's retried on the next load.
-async function loadCodex(): Promise<CodexCache | null> {
+// run (new/edited codex files, a switched embedding model, or a freshly
+// written entry); everything else reuses its cached vector from
+// .data/db/codex-embeddings.json. A per-entry embed failure drops just that
+// entry from semantic retrieval — name/location listing, which doesn't need
+// vectors, still works — and isn't persisted, so it's retried on the next
+// load.
+async function loadCodex(): Promise<CodexCache> {
   const dir = codexDir()
-  if (!dir || !existsSync(dir)) return null
+  // Unconfigured is intentional and permanent until an env change — fine to
+  // memoize. A configured-but-not-yet-existing directory (e.g. a slow-to-
+  // mount path, or the sibling project hasn't been set up yet) is more
+  // likely transient, so it throws instead, which getCache() below treats
+  // as retry-next-call rather than caching an empty result forever.
+  if (!dir) return { entries: [], vectors: new Map() }
+  if (!existsSync(dir)) {
+    throw new Error(`CODEX_DIR is configured (${dir}) but that directory does not exist`)
+  }
 
   const model = useRuntimeConfig().embeddingModel as string
   const found = readCodexFiles(dir)
@@ -143,7 +169,7 @@ async function loadCodex(): Promise<CodexCache | null> {
   for (const { entry, raw } of found) {
     const key = entryKey(entry)
     const hash = hashFor(model, raw)
-    const existing = cached[key]
+    const existing = lookupCached(cached, key)
     if (existing && existing.hash === hash) {
       vectors.set(key, existing.vector)
       nextCached[key] = existing
@@ -172,16 +198,33 @@ async function loadCodex(): Promise<CodexCache | null> {
   return { entries: found.map((f) => f.entry), vectors }
 }
 
-async function getCache(): Promise<CodexCache | null> {
+async function getCache(): Promise<CodexCache> {
   if (!cachePromise) {
     cachePromise = loadCodex().catch((err) => {
       lastError = err instanceof Error ? err.message : String(err)
       console.warn('[codex] failed to load the world codex this attempt, will retry on next use', err)
       cachePromise = undefined
-      return null
+      return { entries: [], vectors: new Map<string, number[]>() }
     })
   }
   return cachePromise
+}
+
+// Called by codexWriteBack.ts right after it writes a new entry, so it's
+// picked up by grounding within the same process — otherwise the memoized
+// cache would keep serving the pre-write snapshot until a restart.
+export function invalidateCodexCache(): void {
+  cachePromise = undefined
+}
+
+export async function getExistingSlugs(category: string): Promise<Set<string>> {
+  const c = await getCache()
+  return new Set(c.entries.filter((e) => e.category === category).map((e) => e.slug))
+}
+
+export async function getLocationNames(): Promise<string[]> {
+  const c = await getCache()
+  return locationsFrom(c).map((l) => l.name)
 }
 
 async function embedQueryCached(query: string): Promise<number[]> {
@@ -220,7 +263,7 @@ export async function getCodexStatus(): Promise<CodexStatus> {
   const c = await getCache()
   return {
     configured: Boolean(codexDir()),
-    entityCount: c ? c.entries.length : 0,
+    entityCount: c.entries.length,
     ...(lastError ? { lastError } : {})
   }
 }
@@ -231,7 +274,7 @@ export async function getCodexStatus(): Promise<CodexStatus> {
 export async function getWorldCanonContext(query: string): Promise<string> {
   try {
     const c = await getCache()
-    if (!c || c.entries.length === 0) return ''
+    if (c.entries.length === 0) return ''
 
     const names = namesFrom(c)
     const locations = locationsFrom(c)
@@ -246,17 +289,23 @@ export async function getWorldCanonContext(query: string): Promise<string> {
 
     if (names.length === 0 && locations.length === 0 && relevant.length === 0) return ''
 
+    // Deliberately NOT a full dump of every entity: the shared codex now
+    // grows from three writers (rag's catalogue.ts, Backlog Saga's own
+    // write-back, and eventually Oath Simulator) with no upper bound, and a
+    // prompt whose size scales with total codex size eventually pushes a
+    // local model's response past chatJSON's timeout. Locations are listed
+    // by name only (no descriptions); full descriptions are reserved for
+    // `relevant`, which is bounded to a fixed top-k via semantic search. An
+    // exact-name collision is still caught deterministically at write time
+    // by codexWriteBack.ts regardless of what's included here.
     const sections: string[] = []
     if (locations.length > 0) {
-      sections.push(`Known locations in this world:\n${locations.map((l) => `- ${l.name}: ${l.description}`).join('\n')}`)
+      sections.push(`Known locations in this world: ${locations.map((l) => l.name).join(', ')}`)
     }
     if (relevant.length > 0) {
       sections.push(
         `Existing canon most relevant to this task:\n${relevant.map((e) => `- ${e.name} (${e.category}): ${e.description}`).join('\n')}`
       )
-    }
-    if (names.length > 0) {
-      sections.push(`All existing named entities, for reference: ${names.join(', ')}`)
     }
 
     return `\n\nEXISTING WORLD CANON — treat everything below as established fact from prior play, for context only. Do not copy this text verbatim, and do not invent a name that duplicates or contradicts it. Where it fits naturally, tie your invention to an existing location rather than a new one.\n${sections.join(
