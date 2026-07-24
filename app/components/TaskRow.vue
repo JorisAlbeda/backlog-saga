@@ -85,7 +85,7 @@ function onBodyKeydown(e: KeyboardEvent) {
     :class="`task-row--${state}`"
     :role="state === 'done' ? 'button' : undefined"
     :tabindex="state === 'done' ? 0 : undefined"
-    :aria-label="state === 'done' ? rowAriaLabel : undefined"
+    :aria-label="state !== 'todo' ? rowAriaLabel : undefined"
     @click="state === 'done' && onRowActivate()"
     @keydown="onRowKeydown"
   >
@@ -206,8 +206,11 @@ function onBodyKeydown(e: KeyboardEvent) {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  padding: 8px;
-  margin: -8px;
+  /* Only horizontal — the 'todo' rule below stretches this button's full
+     height to the row already, so a vertical negative margin here would
+     push its rendered box beyond the row's own bounds. */
+  padding: 0 8px;
+  margin: 0 -8px;
   border: none;
   background: transparent;
   border-radius: 8px;
@@ -233,9 +236,33 @@ function onBodyKeydown(e: KeyboardEvent) {
   border-radius: 6px;
 }
 
+.task-row__body[role='button']:hover {
+  background: var(--color-bg-base);
+}
+
+.task-row__body[role='button']:active {
+  filter: brightness(0.96);
+}
+
 .task-row__body[role='button']:focus-visible {
   outline: 2px solid var(--color-cta-primary);
   outline-offset: 2px;
+}
+
+/* 'todo' rows have no whole-row click handler (checkbox and body are the
+   two targets), so stretch both to the row's full height — otherwise the
+   vertical padding above/below their content (from the row's
+   align-items: center) would be an inert dead zone that used to respond
+   when the entire row was one click target. */
+.task-row--todo .task-row__checkbox-btn,
+.task-row--todo .task-row__body {
+  align-self: stretch;
+}
+
+.task-row--todo .task-row__body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .task-row__title {

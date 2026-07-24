@@ -29,27 +29,44 @@ onUnmounted(() => {
 
 // Grouped by category/faction, in the fixed order factions are declared
 // (not task recency), so sections don't reshuffle as tasks are added or
-// completed. Empty categories are omitted. Tasks within a group are sorted
-// newest first.
+// completed. Tasks within a group are sorted newest first. A todo whose
+// category isn't one of the known CATEGORIES (shouldn't happen via normal
+// create/edit — assertValidCategory blocks it server-side — but legacy or
+// hand-edited data isn't guaranteed to match) still gets its own section
+// via getFaction's fallback, rather than silently disappearing: dropping
+// it here would also desync the empty-state check below, which looks at
+// the raw todo count, not this grouping.
 const groupedTodos = computed(() => {
-  const byCategory = new Map<Category, Todo[]>()
+  const byCategory = new Map<string, Todo[]>()
   for (const todo of todos.value) {
     const group = byCategory.get(todo.category)
     if (group) group.push(todo)
     else byCategory.set(todo.category, [todo])
   }
-  return CATEGORIES.map((category) => ({
-    category,
-    todos: (byCategory.get(category) ?? []).sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-    ),
-  })).filter((group) => group.todos.length > 0)
+  const orderedKeys = [
+    ...CATEGORIES,
+    ...[...byCategory.keys()].filter((key) => !(CATEGORIES as string[]).includes(key)),
+  ]
+  return orderedKeys
+    .map((category) => ({
+      category,
+      todos: (byCategory.get(category) ?? []).sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      ),
+    }))
+    .filter((group) => group.todos.length > 0)
 })
 
 const showAddOverlay = ref(false)
 const editingTodo = ref<Todo | null>(null)
 const completingTodo = ref<Todo | null>(null)
-const inspectingTodo = ref<Todo | null>(null)
+// Held by id (not the Todo object itself) and re-derived from the live
+// `todos` list below, so the popup reflects edits/deletions instead of
+// freezing on whatever snapshot was open when it was first tapped.
+const inspectingTodoId = ref<string | null>(null)
+const inspectingTodo = computed(() =>
+  inspectingTodoId.value ? (todos.value.find((t) => t.id === inspectingTodoId.value) ?? null) : null,
+)
 
 async function handleAddSubmit({
   title,
@@ -75,7 +92,15 @@ async function handleAddSubmit({
   }
 }
 
+// A row's interactive targets (checkbox/body/edit icon) all stay live
+// while `handleComplete`'s PATCH is in flight, since the todo's state
+// doesn't flip until it resolves — so a fast tap on a second target can
+// set another one of these refs before that happens. Each setter below
+// clears the other two, so whichever one is set most recently is the only
+// overlay left open, instead of two rendering stacked at once.
 function openEdit(todo: Todo) {
+  completingTodo.value = null
+  inspectingTodoId.value = null
   editingTodo.value = todo
 }
 
@@ -85,6 +110,8 @@ async function handleRemove(todo: Todo) {
 
 async function handleComplete(todo: Todo) {
   const updated = await completeTodo(todo.id)
+  editingTodo.value = null
+  inspectingTodoId.value = null
   completingTodo.value = updated
 }
 
@@ -93,7 +120,9 @@ function goToDispatch(todo: Todo) {
 }
 
 function inspectTodo(todo: Todo) {
-  inspectingTodo.value = todo
+  editingTodo.value = null
+  completingTodo.value = null
+  inspectingTodoId.value = todo.id
 }
 </script>
 
@@ -156,7 +185,7 @@ function inspectTodo(todo: Todo) {
     <TaskDetailOverlay
       v-if="inspectingTodo"
       :todo="inspectingTodo"
-      @dismiss="inspectingTodo = null"
+      @dismiss="inspectingTodoId = null"
     />
   </div>
 </template>

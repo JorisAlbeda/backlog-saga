@@ -32,8 +32,8 @@ function onSubmit() {
 </script>
 
 <template>
-  <div class="overlay-scrim" role="presentation" @click.self="emit('dismiss')">
-    <form class="overlay-card" role="dialog" aria-modal="true" aria-labelledby="add-task-title" @submit.prevent="onSubmit">
+  <BaseOverlay aria-labelledby="add-task-title" @dismiss="emit('dismiss')">
+    <form @submit.prevent="onSubmit">
       <p class="caption overlay-card__eyebrow">{{ mode === 'edit' ? 'Edit Task' : 'Draft a Task' }}</p>
       <h2 id="add-task-title">{{ mode === 'edit' ? 'Rename this commission' : 'What needs doing?' }}</h2>
 
@@ -61,34 +61,19 @@ function onSubmit() {
         {{ mode === 'edit' ? 'Save Changes' : 'Add to the Ledger' }}
       </PrimaryButton>
     </form>
-  </div>
+  </BaseOverlay>
 </template>
 
 <style scoped>
-.overlay-scrim {
-  position: absolute;
-  inset: 0;
-  background: rgba(26, 20, 14, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--spacing-screen-inset);
-  z-index: 20;
-}
-
-.overlay-card {
-  width: 100%;
-  background: var(--color-bg-card);
-  border-radius: var(--radius-card);
-  padding: var(--spacing-internal-card);
-  text-align: left;
+form {
+  margin: 0;
 }
 
 .overlay-card__eyebrow {
   margin: 0 0 8px;
 }
 
-.overlay-card h2 {
+h2 {
   margin: 0 0 16px;
   font-family: var(--font-heading);
   font-size: 19px;

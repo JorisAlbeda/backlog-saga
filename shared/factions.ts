@@ -25,6 +25,9 @@ export interface FactionConfig {
   detailLabel: string
 }
 
+// Declaration order here is user-facing: app/pages/index.vue's Ledger
+// renders one section per category in exactly this order (via CATEGORIES
+// below), so reordering these keys reorders the Ledger's sections too.
 export const FACTIONS: Record<Category, FactionConfig> = {
   'home-improvement': {
     factionName: 'Construction Guild',
@@ -78,6 +81,7 @@ export const FACTIONS: Record<Category, FactionConfig> = {
   }
 }
 
+// Order is significant — see the comment on FACTIONS above.
 export const CATEGORIES = Object.keys(FACTIONS) as Category[]
 
 // category is a fixed union at the type level, but data read back from disk
