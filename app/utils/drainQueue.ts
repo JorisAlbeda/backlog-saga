@@ -19,7 +19,7 @@ export interface DrainOutcome {
 // server.
 export async function drainActions(
   actions: PendingAction[],
-  replay: (action: PendingAction) => Promise<void>,
+  replay: (action: PendingAction) => Promise<'applied' | 'discarded'>,
   describeAction: (action: PendingAction) => string
 ): Promise<DrainOutcome> {
   const remaining: PendingAction[] = []
@@ -33,8 +33,12 @@ export async function drainActions(
       continue
     }
     try {
-      await replay(action)
-      resolvedMessages.push(`Synced: ${describeAction(action)}`)
+      const outcome = await replay(action)
+      resolvedMessages.push(
+        outcome === 'discarded'
+          ? `Discarded: ${describeAction(action)} — that task was deleted`
+          : `Synced: ${describeAction(action)}`
+      )
     } catch (err) {
       if (isNetworkFailure(err)) {
         remaining.push(action)

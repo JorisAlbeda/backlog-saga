@@ -41,21 +41,23 @@ export function useTodos() {
     syncReport.value = [{ message, at: new Date().toISOString() }, ...syncReport.value].slice(0, 10)
   }
 
-  async function replayAction(action: PendingAction): Promise<void> {
+  async function replayAction(action: PendingAction): Promise<'applied' | 'discarded'> {
     switch (action.type) {
       case 'create':
         await $fetch(`/api/todos`, { method: 'POST', body: { id: action.tempId, title: action.title, category: action.category } })
-        return
-      case 'patch':
-        await $fetch(`/api/todos/${action.id}`, { method: 'PATCH', body: { title: action.title, category: action.category } })
-        return
+        return 'applied'
+      case 'patch': {
+        const result = await $fetch<Todo | TodoNotFound>(`/api/todos/${action.id}`, { method: 'PATCH', body: { title: action.title, category: action.category } })
+        return isTodoNotFound(result) ? 'discarded' : 'applied'
+      }
       case 'complete':
-      case 'reopen':
-        await $fetch(`/api/todos/${action.id}`, { method: 'PATCH', body: { action: action.type } })
-        return
+      case 'reopen': {
+        const result = await $fetch<Todo | TodoNotFound>(`/api/todos/${action.id}`, { method: 'PATCH', body: { action: action.type } })
+        return isTodoNotFound(result) ? 'discarded' : 'applied'
+      }
       case 'delete':
         await $fetch(`/api/todos/${action.id}`, { method: 'DELETE' })
-        return
+        return 'applied'
     }
   }
 

@@ -9,9 +9,17 @@ function describeAction(action: PendingAction): string {
 describe('drainActions', () => {
   it('resolves an action successfully and removes it from the queue', async () => {
     const actions: PendingAction[] = [{ type: 'delete', id: 't1', status: 'pending' }]
-    const result = await drainActions(actions, async () => {}, describeAction)
+    const result = await drainActions(actions, async () => 'applied', describeAction)
     expect(result.remaining).toEqual([])
     expect(result.resolvedMessages).toEqual(['Synced: delete'])
+    expect(result.stoppedEarly).toBe(false)
+  })
+
+  it('logs a discarded action distinctly when the target was already deleted', async () => {
+    const actions: PendingAction[] = [{ type: 'complete', id: 't1', status: 'pending' }]
+    const result = await drainActions(actions, async () => 'discarded', describeAction)
+    expect(result.remaining).toEqual([])
+    expect(result.resolvedMessages).toEqual(['Discarded: complete — that task was deleted'])
     expect(result.stoppedEarly).toBe(false)
   })
 
@@ -37,6 +45,7 @@ describe('drainActions', () => {
       actions,
       async (action) => {
         if (action.type === 'complete') throw httpError
+        return 'applied'
       },
       describeAction
     )
