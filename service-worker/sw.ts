@@ -4,6 +4,13 @@ import { NavigationRoute, registerRoute } from 'workbox-routing'
 
 declare let self: ServiceWorkerGlobalScope
 
+// `SyncEvent` isn't part of the default `webworker` lib types (Background
+// Sync isn't universally standardized), so declare the minimal shape used
+// below.
+declare interface SyncEvent extends ExtendableEvent {
+  tag: string
+}
+
 // Injected at build time by @vite-pwa/nuxt with the actual list of built
 // assets — this is what lets the installed app open with zero
 // connectivity instead of needing the PC's server to render anything.
@@ -32,3 +39,17 @@ registerRoute(
 
 self.skipWaiting()
 self.addEventListener('activate', () => self.clients.claim())
+
+const SYNC_TAG = 'offline-queue-drain'
+
+self.addEventListener('sync', (event) => {
+  const syncEvent = event as SyncEvent
+  if (syncEvent.tag !== SYNC_TAG) return
+  syncEvent.waitUntil(
+    self.clients.matchAll().then((clients) => {
+      for (const client of clients) {
+        client.postMessage({ type: 'background-sync-drain' })
+      }
+    })
+  )
+})

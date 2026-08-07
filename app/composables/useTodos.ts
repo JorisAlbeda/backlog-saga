@@ -10,10 +10,12 @@ import {
   isNetworkFailure
 } from '../utils/offlineQueue'
 import { drainActions } from '../utils/drainQueue'
+import { shouldAttemptBackgroundSync } from '../utils/backgroundSync'
 
 // Module-scoped so every caller of useTodos() shares the same interval handle
 // rather than each component starting its own poll loop.
 let pollHandle: ReturnType<typeof setInterval> | undefined
+let messageListenerAttached = false
 
 export function useTodos() {
   const todos = useState<Todo[]>('todos', () => [])
@@ -29,6 +31,15 @@ export function useTodos() {
   }
   if (import.meta.client && pendingActions.value.length === 0) {
     pendingActions.value = loadQueue()
+  }
+
+  if (import.meta.client && !messageListenerAttached) {
+    messageListenerAttached = true
+    navigator.serviceWorker?.addEventListener('message', (event) => {
+      if (event.data?.type === 'background-sync-drain') {
+        checkReachableAndDrain().catch(() => {})
+      }
+    })
   }
 
   const pendingIds = computed(() => new Set(pendingActions.value.map(a => (a.type === 'create' ? a.tempId : a.id))))
@@ -119,11 +130,30 @@ export function useTodos() {
     if (import.meta.client) saveQueue(pendingActions.value)
   }
 
+  const SYNC_TAG = 'offline-queue-drain'
+
+  async function registerBackgroundSync() {
+    if (!import.meta.client) return
+    const connection = (navigator as { connection?: { type?: string } }).connection
+    if (!shouldAttemptBackgroundSync(connection)) return
+    if (!('serviceWorker' in navigator)) return
+    try {
+      const registration = await navigator.serviceWorker.ready
+      if ('sync' in registration) {
+        await (registration as ServiceWorkerRegistration & { sync: { register(tag: string): Promise<void> } }).sync.register(SYNC_TAG)
+      }
+    } catch {
+      // Background Sync isn't supported/available — the foreground poll
+      // from Task 8 is still the primary mechanism, so this is a no-op.
+    }
+  }
+
   function queueAndApplyOptimistically(action: PendingAction) {
     pendingActions.value = enqueueAction(pendingActions.value, action)
     todos.value = applyActionOptimistically(todos.value, action)
     persistQueue()
     persistCache()
+    registerBackgroundSync().catch(() => {})
   }
 
   async function refresh() {
