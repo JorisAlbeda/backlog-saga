@@ -13,6 +13,40 @@ export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   devtools: { enabled: true },
   css: ['~/assets/tokens.css'],
+  modules: ['@vite-pwa/nuxt'],
+  // The installed app must open from the service worker's cache with zero
+  // connectivity, so it can't rely on a fresh server render — see
+  // docs/superpowers/specs/2026-08-07-offline-pwa-sync-design.md.
+  routeRules: {
+    '/': { ssr: false }
+  },
+  pwa: {
+    strategies: 'injectManifest',
+    // Nuxt 4's default directory structure resolves the Vite client build's
+    // `root` to `<rootDir>/app`, and @vite-pwa/nuxt resolves this srcDir
+    // against that root (not the project root) — so this must climb back out
+    // of `app/` to reach the project-root-level `service-worker/` directory.
+    srcDir: '../service-worker',
+    filename: 'sw.ts',
+    registerType: 'autoUpdate',
+    devOptions: { enabled: true, type: 'module' },
+    injectManifest: {
+      globPatterns: ['**/*.{js,css,html,svg,png,ico}']
+    },
+    manifest: {
+      name: 'Backlog Saga',
+      short_name: 'Backlog Saga',
+      description: 'A fantasy-themed todo ledger',
+      start_url: '/',
+      display: 'standalone',
+      background_color: '#f5efe3',
+      theme_color: '#1b2a4a',
+      icons: [
+        { src: '/favicon.png', sizes: '72x72', type: 'image/png' },
+        { src: '/favicon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }
+      ]
+    }
+  },
   runtimeConfig: {
     ollamaBaseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
     ollamaModel: process.env.OLLAMA_MODEL || 'qwen3:8b',
