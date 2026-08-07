@@ -9,6 +9,7 @@ const {
   lastSyncedAt,
   refresh,
   createTodo,
+  editTodo,
   completeTodo,
   removeTodo,
   startPolling,
@@ -76,15 +77,7 @@ async function handleAddSubmit({
   category: Category
 }) {
   if (editingTodo.value) {
-    try {
-      await $fetch(`/api/todos/${editingTodo.value.id}`, {
-        method: "PATCH",
-        body: { title, category },
-      })
-    } catch (err) {
-      console.error("[ledger] failed to save task", err)
-    }
-    await refresh()
+    await editTodo(editingTodo.value.id, title, category)
     editingTodo.value = null
   } else {
     await createTodo(title, category)
