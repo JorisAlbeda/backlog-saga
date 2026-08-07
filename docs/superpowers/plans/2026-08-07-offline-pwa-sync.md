@@ -1670,7 +1670,7 @@ This task is declarative config plus inherently browser-platform behavior (manif
 - [ ] **Step 1: Install PWA dependencies**
 
 ```bash
-npm install -D @vite-pwa/nuxt workbox-precaching
+npm install -D @vite-pwa/nuxt workbox-precaching workbox-routing
 ```
 
 - [ ] **Step 2: Add the custom service worker source**
@@ -1679,7 +1679,8 @@ Create `service-worker/sw.ts`:
 
 ```ts
 /// <reference lib="webworker" />
-import { precacheAndRoute } from 'workbox-precaching'
+import { precacheAndRoute, createHandlerBoundToURL } from 'workbox-precaching'
+import { registerRoute, NavigationRoute } from 'workbox-routing'
 
 declare let self: ServiceWorkerGlobalScope
 
@@ -1688,15 +1689,30 @@ declare let self: ServiceWorkerGlobalScope
 // connectivity instead of needing the PC's server to render anything.
 precacheAndRoute(self.__WB_MANIFEST)
 
+// precacheAndRoute alone only serves exact precached URLs — it does not
+// treat an arbitrary navigation as "serve the app shell." Without this,
+// an offline reload still falls through to the network and fails. The
+// shell is precached at the manifest key '/' (not '/index.html' — that
+// depends on how the route was prerendered; verify the actual key in the
+// built precache manifest, since a mismatch throws `non-precached-url` at
+// service worker load). /api/* is excluded so offline requests to actual
+// data endpoints fail/queue as intended instead of resolving to HTML.
+registerRoute(new NavigationRoute(createHandlerBoundToURL('/'), { denylist: [/^\/api\//] }))
+
 self.skipWaiting()
 self.addEventListener('activate', () => self.clients.claim())
 ```
+
+`workbox-routing` is an additional dependency alongside `workbox-precaching` (added in Step 1's install command).
 
 (The Background Sync `sync` event listener is added in Task 11, once there's a client-side consumer for the message it sends.)
 
 - [ ] **Step 3: Configure `@vite-pwa/nuxt` and the offline-capable route**
 
-In `nuxt.config.ts`, add the module and its config, and switch the ledger route to client rendering:
+In `nuxt.config.ts`, add the module and its config, and switch the ledger route to client rendering. Two things need to be exactly right here, both non-obvious and both required for the installed app to actually open offline — verify each against the actually-installed package versions rather than trusting this snippet blindly, since these depend on package internals:
+
+- `routeRules['/']` needs **both** `ssr: false` **and** `prerender: true`. `ssr: false` alone does not produce a static HTML file — Nitro still generates the document per-request, so there's nothing for `injectManifest`'s glob to precache. `prerender: true` makes Nitro emit an actual static file at build time; combined with `ssr: false`, that file is a bare client-hydration shell (not server-rendered content) — exactly what an offline app shell needs, since real data comes from the local cache/queue at runtime, not from server-rendered HTML.
+- `pwa.srcDir` needs to be `'../service-worker'`, not `'service-worker'`. This project uses Nuxt 4's `app/` srcDir structure, so Vite's client build root is `<rootDir>/app`, and `vite-plugin-pwa` resolves `srcDir` against that root, not the repo root — `'service-worker'` would resolve to a nonexistent `app/service-worker/` and fail to build.
 
 ```ts
 export default defineNuxtConfig({
@@ -1708,11 +1724,11 @@ export default defineNuxtConfig({
   // connectivity, so it can't rely on a fresh server render — see
   // docs/superpowers/specs/2026-08-07-offline-pwa-sync-design.md.
   routeRules: {
-    '/': { ssr: false }
+    '/': { ssr: false, prerender: true }
   },
   pwa: {
     strategies: 'injectManifest',
-    srcDir: 'service-worker',
+    srcDir: '../service-worker',
     filename: 'sw.ts',
     registerType: 'autoUpdate',
     devOptions: { enabled: true, type: 'module' },
