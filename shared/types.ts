@@ -43,6 +43,20 @@ export interface Todo {
   version: number
 }
 
+// Returned instead of a Todo by the mutation endpoints (PATCH/DELETE) when
+// the target id doesn't exist — these endpoints are idempotent by design
+// (see docs/superpowers/specs/2026-08-07-offline-pwa-sync-design.md), so
+// "already gone" is a successful outcome, not an error. Distinguishable
+// from a real Todo by the `status` field, which no Todo has.
+export interface TodoNotFound {
+  id: string
+  status: 'not-found'
+}
+
+export function isTodoNotFound(value: Todo | TodoNotFound): value is TodoNotFound {
+  return 'status' in value && value.status === 'not-found'
+}
+
 export type TaskState = 'todo' | 'taking-shape' | 'done'
 
 export function getTaskState(todo: Pick<Todo, 'completedAt' | 'guildStatus'>): TaskState {

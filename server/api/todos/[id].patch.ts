@@ -1,4 +1,4 @@
-import type { Category, Todo } from '../../../shared/types'
+import type { Category, Todo, TodoNotFound } from '../../../shared/types'
 
 interface PatchBody {
   title?: string
@@ -61,7 +61,7 @@ export default defineEventHandler(async (event) => {
   })
 
   if (!updated) {
-    throw createError({ statusCode: 404, statusMessage: 'todo not found' })
+    return { id, status: 'not-found' } satisfies TodoNotFound
   }
   return updated
 })
