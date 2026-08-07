@@ -28,6 +28,21 @@
   badge with an `aria-label`/tooltip — not a checkbox variant (that channel
   is already used by the taking-shape state) and not color alone.
 - Spec source of truth: `docs/superpowers/specs/2026-08-07-offline-pwa-sync-design.md`.
+- **Test coverage policy (decided with the human partner during the
+  pre-flight scan, before Task 1 was dispatched):** every task whose logic
+  can be isolated from Nuxt's runtime/browser platform extracts that logic
+  into a plain, dependency-free function under `app/utils/` and covers it
+  with a Vitest unit test — Tasks 2, 8, 9, and 11 each name the specific
+  extraction in their own task text. Logic that is inherently Nuxt-runtime
+  glue (`$fetch`/`useState` wiring in `useTodos.ts`) or inherently
+  browser-platform behavior with nothing pure to extract (Task 10's PWA
+  manifest/service-worker config) stays live-verified only, via Task 12's
+  manual pass. This split is a deliberate, already-adjudicated decision,
+  not an oversight — if a task review flags a missing test on code that
+  falls in the glue/platform category, the controller resolves it directly
+  against this note rather than opening a fix loop; a review flagging a
+  *named extraction* that was actually skipped is a real finding and goes
+  through the normal loop.
 
 ---
 
@@ -35,10 +50,17 @@
 
 **New:**
 - `test/server/todos-idempotency.e2e.test.ts` — e2e tests for the mutation routes' idempotent behavior, via a real running test server.
+- `test/shared/types.test.ts` — unit test for `isTodoNotFound`.
 - `test/utils/offlineCache.test.ts` — unit tests for the local `Todo[]` mirror.
 - `test/utils/offlineQueue.test.ts` — unit tests for the pending-actions queue logic.
+- `test/utils/drainQueue.test.ts` — unit tests for the extracted queue-drain orchestration logic.
+- `test/utils/syncStatusLabel.test.ts` — unit tests for the sync-status label logic.
+- `test/utils/backgroundSync.test.ts` — unit test for the cellular-skip predicate.
 - `app/utils/offlineCache.ts` — `loadCachedTodos()` / `saveCachedTodos()`, fail-soft `localStorage` mirror of the todo list.
 - `app/utils/offlineQueue.ts` — `PendingAction` type, queue load/save, the create+delete collapsing rule, the optimistic-apply function, and the network-vs-HTTP-error classifier.
+- `app/utils/drainQueue.ts` — pure `drainActions()` orchestration (network failure stops the whole pass; a real HTTP error from a reachable server only parks that one action and the rest keep draining), with the network calls injected so it's testable without a server. Used by `useTodos.ts`.
+- `app/utils/syncStatusLabel.ts` — pure `computeSyncStatusLabel()`, the branching behind the header status text. Used by `SyncStatus.vue`.
+- `app/utils/backgroundSync.ts` — pure `shouldAttemptBackgroundSync()` predicate (the cellular-skip rule). Used by `useTodos.ts`'s Background Sync registration.
 - `app/components/SyncStatus.vue` — header status indicator (pending count / syncing / all synced / failed), tappable to force a sync attempt.
 - `service-worker/sw.ts` — custom Workbox `injectManifest` service worker source: precaching plus the `sync` event listener that pings open clients to drain the queue.
 - `public/pwa-icon.png` — not created (reusing existing `public/favicon.svg` and `public/favicon.png` as manifest icons — see Task 10).
@@ -171,6 +193,41 @@ git commit -m "test: add Vitest + isolated-storage e2e test harness"
 **Interfaces:**
 - Produces: `TodoNotFound { id: string; status: 'not-found' }` and `isTodoNotFound(value: Todo | TodoNotFound): value is TodoNotFound` from `shared/types.ts` — used by every later task that reads a PATCH response (the client dispatch layer in Task 7, and the queue drain in Task 8).
 
+- [ ] **Step 0: Write the failing unit test for the type guard**
+
+Create `test/shared/types.test.ts`:
+
+```ts
+import { describe, it, expect } from 'vitest'
+import { isTodoNotFound } from '../../shared/types'
+import type { Todo } from '../../shared/types'
+
+const sampleTodo: Todo = {
+  id: 't1',
+  title: 'Fix the fence post',
+  createdAt: '2026-08-01T00:00:00.000Z',
+  completedAt: null,
+  guildStatus: 'init',
+  category: 'home-improvement',
+  text: { init: 'A construction guild task awaits.' },
+  chronicleWritten: false,
+  version: 1
+}
+
+describe('isTodoNotFound', () => {
+  it('is true for a not-found marker', () => {
+    expect(isTodoNotFound({ id: 't1', status: 'not-found' })).toBe(true)
+  })
+
+  it('is false for a real Todo', () => {
+    expect(isTodoNotFound(sampleTodo)).toBe(false)
+  })
+})
+```
+
+Run: `npm test -- types.test`
+Expected: FAIL with a module-not-found error (`isTodoNotFound` doesn't exist yet).
+
 - [ ] **Step 1: Write the failing e2e test**
 
 Create `test/server/todos-idempotency.e2e.test.ts`:
@@ -253,7 +310,10 @@ import type { Category, Todo, TodoNotFound } from '../../../shared/types'
 
 (replacing the existing `throw createError({ statusCode: 404, ... })` block.)
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [ ] **Step 5: Run both the unit test and the e2e test to verify they pass**
+
+Run: `npm test -- types.test`
+Expected: PASS (both `isTodoNotFound` tests).
 
 Run: `npm test -- todos-idempotency`
 Expected: PASS (both tests).
@@ -261,7 +321,7 @@ Expected: PASS (both tests).
 - [ ] **Step 6: Commit**
 
 ```bash
-git add shared/types.ts server/api/todos/[id].patch.ts test/server/todos-idempotency.e2e.test.ts
+git add shared/types.ts server/api/todos/[id].patch.ts test/shared/types.test.ts test/server/todos-idempotency.e2e.test.ts
 git commit -m "feat: make PATCH /api/todos/:id idempotent for missing ids"
 ```
 
@@ -1088,11 +1148,146 @@ git commit -m "feat: route all todo mutations through offline-aware dispatch"
 
 **Interfaces:**
 - Consumes: everything from Task 7's `useTodos.ts` state.
-- Produces: `useTodos()` additionally returns `syncStatus: Ref<'idle' | 'syncing'>`, `failedCount: ComputedRef<number>`, `syncReport: Ref<{ message: string, at: string }[]>`, `forceSync(): Promise<void>` — consumed by Task 9's `SyncStatus.vue` and Task 11's Background Sync handler.
+- Produces: `drainActions(actions: PendingAction[], replay: (action: PendingAction) => Promise<void>, describeAction: (action: PendingAction) => string): Promise<{ remaining: PendingAction[], resolvedMessages: string[], failedMessages: string[], stoppedEarly: boolean }>` from `app/utils/drainQueue.ts` — the actual drain branching logic, kept free of `$fetch`/Vue state so it's unit-testable with a fake `replay`. `useTodos()` additionally returns `syncStatus: Ref<'idle' | 'syncing'>`, `failedCount: ComputedRef<number>`, `syncReport: Ref<{ message: string, at: string }[]>`, `forceSync(): Promise<void>` — consumed by Task 9's `SyncStatus.vue` and Task 11's Background Sync handler.
 
-- [ ] **Step 1: Add sync status state and the drain implementation**
+- [ ] **Step 1: Write the failing unit tests for the drain orchestration logic**
 
-In `app/composables/useTodos.ts`, inside `useTodos()`, add (after `pendingIds`):
+Create `test/utils/drainQueue.test.ts`:
+
+```ts
+import { describe, it, expect } from 'vitest'
+import { drainActions } from '../../app/utils/drainQueue'
+import type { PendingAction } from '../../app/utils/offlineQueue'
+
+function describeAction(action: PendingAction): string {
+  return action.type
+}
+
+describe('drainActions', () => {
+  it('resolves an action successfully and removes it from the queue', async () => {
+    const actions: PendingAction[] = [{ type: 'delete', id: 't1', status: 'pending' }]
+    const result = await drainActions(actions, async () => {}, describeAction)
+    expect(result.remaining).toEqual([])
+    expect(result.resolvedMessages).toEqual(['Synced: delete'])
+    expect(result.stoppedEarly).toBe(false)
+  })
+
+  it('stops the whole drain on a network failure and leaves remaining actions queued', async () => {
+    const actions: PendingAction[] = [
+      { type: 'delete', id: 't1', status: 'pending' },
+      { type: 'complete', id: 't2', status: 'pending' }
+    ]
+    const networkError = new Error('fetch failed')
+    const result = await drainActions(actions, async () => { throw networkError }, describeAction)
+    expect(result.remaining).toEqual(actions)
+    expect(result.resolvedMessages).toEqual([])
+    expect(result.stoppedEarly).toBe(true)
+  })
+
+  it('marks an action failed on a non-network error and keeps draining the rest', async () => {
+    const actions: PendingAction[] = [
+      { type: 'complete', id: 't1', status: 'pending' },
+      { type: 'delete', id: 't2', status: 'pending' }
+    ]
+    const httpError = Object.assign(new Error('400'), { response: { status: 400 } })
+    const result = await drainActions(
+      actions,
+      async (action) => {
+        if (action.type === 'complete') throw httpError
+      },
+      describeAction
+    )
+    expect(result.remaining).toEqual([{ type: 'complete', id: 't1', status: 'failed' }])
+    expect(result.resolvedMessages).toEqual(['Synced: delete'])
+    expect(result.failedMessages).toEqual(['Failed to sync: complete'])
+    expect(result.stoppedEarly).toBe(false)
+  })
+
+  it('leaves already-failed actions untouched and does not retry them', async () => {
+    const actions: PendingAction[] = [{ type: 'delete', id: 't1', status: 'failed' }]
+    const result = await drainActions(actions, async () => { throw new Error('should not be called') }, describeAction)
+    expect(result.remaining).toEqual(actions)
+    expect(result.resolvedMessages).toEqual([])
+  })
+})
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `npm test -- drainQueue`
+Expected: FAIL with a module-not-found error (`app/utils/drainQueue.ts` doesn't exist yet).
+
+- [ ] **Step 3: Implement the drain orchestration module**
+
+Create `app/utils/drainQueue.ts`:
+
+```ts
+import type { PendingAction } from './offlineQueue'
+import { isNetworkFailure } from './offlineQueue'
+
+export interface DrainOutcome {
+  remaining: PendingAction[]
+  resolvedMessages: string[]
+  failedMessages: string[]
+  stoppedEarly: boolean
+}
+
+// Replays a queue of actions in order. A network failure (the PC dropped
+// mid-drain) stops the whole pass — everything from that point on is left
+// queued for the next reachable check. A real HTTP error from a still-
+// reachable server only parks that one action as `failed` and keeps
+// draining the rest, since it says nothing about whether the others will
+// also fail. Already-`failed` actions are left untouched — they're not
+// auto-retried, only a manual retry or discard changes them. The actual
+// network call is injected (`replay`) so this stays testable without a
+// server.
+export async function drainActions(
+  actions: PendingAction[],
+  replay: (action: PendingAction) => Promise<void>,
+  describeAction: (action: PendingAction) => string
+): Promise<DrainOutcome> {
+  const remaining: PendingAction[] = []
+  const resolvedMessages: string[] = []
+  const failedMessages: string[] = []
+  let stoppedEarly = false
+
+  for (const action of actions) {
+    if (stoppedEarly || action.status === 'failed') {
+      remaining.push(action)
+      continue
+    }
+    try {
+      await replay(action)
+      resolvedMessages.push(`Synced: ${describeAction(action)}`)
+    } catch (err) {
+      if (isNetworkFailure(err)) {
+        remaining.push(action)
+        stoppedEarly = true
+      } else {
+        remaining.push({ ...action, status: 'failed' })
+        failedMessages.push(`Failed to sync: ${describeAction(action)}`)
+      }
+    }
+  }
+
+  return { remaining, resolvedMessages, failedMessages, stoppedEarly }
+}
+```
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+Run: `npm test -- drainQueue`
+Expected: PASS (all four tests).
+
+- [ ] **Step 5: Wire the module into `useTodos.ts`**
+
+In `app/composables/useTodos.ts`, add the import:
+
+```ts
+import { drainActions } from '../utils/drainQueue'
+```
+
+Inside `useTodos()`, add (after `pendingIds`):
 
 ```ts
   const syncStatus = useState<'idle' | 'syncing'>('todos-sync-status', () => 'idle')
@@ -1126,38 +1321,19 @@ In `app/composables/useTodos.ts`, inside `useTodos()`, add (after `pendingIds`):
     return `${action.type} (${target})`
   }
 
-  // Replays the queue in order. A network failure (PC dropped mid-drain)
-  // stops the whole pass — everything from that point on is left queued
-  // for the next reachable check. A real HTTP error from a still-reachable
-  // server only parks that one action as `failed` and keeps draining the
-  // rest, since it says nothing about whether the others will also fail.
   async function drainQueue() {
     if (syncStatus.value === 'syncing') return
     const drainable = pendingActions.value.filter(a => a.status !== 'failed')
     if (drainable.length === 0) return
 
     syncStatus.value = 'syncing'
-    const remaining: PendingAction[] = []
-    let stoppedEarly = false
-
-    for (const action of pendingActions.value) {
-      if (stoppedEarly || action.status === 'failed') {
-        remaining.push(action)
-        continue
-      }
-      try {
-        await replayAction(action)
-        logSyncReport(`Synced: ${describeAction(action)}`)
-      } catch (err) {
-        if (isNetworkFailure(err)) {
-          remaining.push(action)
-          stoppedEarly = true
-        } else {
-          remaining.push({ ...action, status: 'failed' })
-          logSyncReport(`Failed to sync: ${describeAction(action)}`)
-        }
-      }
-    }
+    const { remaining, resolvedMessages, failedMessages, stoppedEarly } = await drainActions(
+      pendingActions.value,
+      replayAction,
+      describeAction
+    )
+    for (const message of resolvedMessages) logSyncReport(message)
+    for (const message of failedMessages) logSyncReport(message)
 
     pendingActions.value = remaining
     persistQueue()
@@ -1191,7 +1367,7 @@ In `app/composables/useTodos.ts`, inside `useTodos()`, add (after `pendingIds`):
   }
 ```
 
-- [ ] **Step 2: Fold the reachability check into the existing poll loop**
+- [ ] **Step 6: Fold the reachability check into the existing poll loop**
 
 Replace `startPolling`:
 
@@ -1210,7 +1386,7 @@ Replace `startPolling`:
   }
 ```
 
-- [ ] **Step 3: Return the new fields**
+- [ ] **Step 7: Return the new fields**
 
 Add to the returned object from Task 7:
 
@@ -1221,15 +1397,15 @@ Add to the returned object from Task 7:
     forceSync,
 ```
 
-- [ ] **Step 4: Run the full test suite**
+- [ ] **Step 8: Run the full test suite**
 
 Run: `npm test`
-Expected: PASS (no regressions — this task has no new automated tests of its own; `drainQueue`'s branching is exercised indirectly by the pure functions it calls, already covered in Task 6, and gets a live pass in Task 12).
+Expected: PASS — every test from Tasks 1–6 plus the four new `drainQueue` tests from Step 4, no regressions. `useTodos.ts`'s own wiring around `drainActions` (the `$fetch` calls in `replayAction`, the poll loop) has no dedicated test of its own — it's thin glue over the now-tested `drainActions`, `$fetch`, and `useState`, verified live in Task 12, consistent with the rest of this composable.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add app/composables/useTodos.ts
+git add app/composables/useTodos.ts app/utils/drainQueue.ts test/utils/drainQueue.test.ts
 git commit -m "feat: drain the offline queue on reachability, add forceSync"
 ```
 
@@ -1244,6 +1420,7 @@ git commit -m "feat: drain the offline queue on reachability, add forceSync"
 
 **Interfaces:**
 - Consumes: `pendingIds`, `syncStatus`, `syncReport`, `failedCount`, `forceSync` from Task 7/8's `useTodos()`.
+- Produces: `computeSyncStatusLabel(input: { pendingCount: number, failedCount: number, syncing: boolean }): string` from `app/utils/syncStatusLabel.ts` — the label-priority branching (syncing > failed > pending > all-synced), kept out of the `.vue` file so it's unit-testable without mounting a component.
 
 - [ ] **Step 1: Add a `pending` prop and badge to `TaskRow.vue`**
 
@@ -1320,12 +1497,78 @@ const {
             />
 ```
 
-- [ ] **Step 3: Create the header status indicator**
+- [ ] **Step 3: Write the failing unit tests for the status-label logic**
+
+Create `test/utils/syncStatusLabel.test.ts`:
+
+```ts
+import { describe, it, expect } from 'vitest'
+import { computeSyncStatusLabel } from '../../app/utils/syncStatusLabel'
+
+describe('computeSyncStatusLabel', () => {
+  it('shows "Syncing…" while a sync is in progress, regardless of counts', () => {
+    expect(computeSyncStatusLabel({ pendingCount: 3, failedCount: 1, syncing: true })).toBe('Syncing…')
+  })
+
+  it('prioritizes failed count over pending count', () => {
+    expect(computeSyncStatusLabel({ pendingCount: 2, failedCount: 1, syncing: false })).toBe("1 change couldn't sync")
+  })
+
+  it('pluralizes failed count', () => {
+    expect(computeSyncStatusLabel({ pendingCount: 0, failedCount: 2, syncing: false })).toBe("2 changes couldn't sync")
+  })
+
+  it('shows pending count when nothing has failed', () => {
+    expect(computeSyncStatusLabel({ pendingCount: 1, failedCount: 0, syncing: false })).toBe('1 change pending')
+  })
+
+  it('pluralizes pending count', () => {
+    expect(computeSyncStatusLabel({ pendingCount: 3, failedCount: 0, syncing: false })).toBe('3 changes pending')
+  })
+
+  it('shows "All synced" when idle with nothing pending or failed', () => {
+    expect(computeSyncStatusLabel({ pendingCount: 0, failedCount: 0, syncing: false })).toBe('All synced')
+  })
+})
+```
+
+- [ ] **Step 4: Run it to verify it fails**
+
+Run: `npm test -- syncStatusLabel`
+Expected: FAIL with a module-not-found error.
+
+- [ ] **Step 5: Implement the status-label module**
+
+Create `app/utils/syncStatusLabel.ts`:
+
+```ts
+export interface SyncStatusInput {
+  pendingCount: number
+  failedCount: number
+  syncing: boolean
+}
+
+export function computeSyncStatusLabel(input: SyncStatusInput): string {
+  if (input.syncing) return 'Syncing…'
+  if (input.failedCount > 0) return `${input.failedCount} change${input.failedCount === 1 ? '' : 's'} couldn't sync`
+  if (input.pendingCount > 0) return `${input.pendingCount} change${input.pendingCount === 1 ? '' : 's'} pending`
+  return 'All synced'
+}
+```
+
+- [ ] **Step 6: Run the tests to verify they pass**
+
+Run: `npm test -- syncStatusLabel`
+Expected: PASS (all six tests).
+
+- [ ] **Step 7: Create the header status indicator**
 
 Create `app/components/SyncStatus.vue`:
 
 ```vue
 <script setup lang="ts">
+import { computeSyncStatusLabel } from '../utils/syncStatusLabel'
+
 const props = defineProps<{
   pendingCount: number
   failedCount: number
@@ -1334,12 +1577,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ sync: [] }>()
 
-const label = computed(() => {
-  if (props.syncing) return 'Syncing…'
-  if (props.failedCount > 0) return `${props.failedCount} change${props.failedCount === 1 ? '' : 's'} couldn't sync`
-  if (props.pendingCount > 0) return `${props.pendingCount} change${props.pendingCount === 1 ? '' : 's'} pending`
-  return 'All synced'
-})
+const label = computed(() => computeSyncStatusLabel(props))
 
 const isIdle = computed(() => !props.syncing && props.pendingCount === 0 && props.failedCount === 0)
 </script>
@@ -1383,7 +1621,7 @@ const isIdle = computed(() => !props.syncing && props.pendingCount === 0 && prop
 </style>
 ```
 
-- [ ] **Step 4: Wire it into `index.vue`**
+- [ ] **Step 8: Wire it into `index.vue`**
 
 Add right after `<LedgerHeader />`:
 
@@ -1398,19 +1636,19 @@ Add right after `<LedgerHeader />`:
 
 (This reads `pendingActions` directly, so also destructure it from `useTodos()` in the `<script setup>` block alongside the fields added in Step 2.)
 
-- [ ] **Step 5: Run the full test suite**
+- [ ] **Step 9: Run the full test suite**
 
 Run: `npm test`
-Expected: PASS (no regressions).
+Expected: PASS — every test from Tasks 1–8 plus the six new `syncStatusLabel` tests from Step 6, no regressions.
 
-- [ ] **Step 6: Live check**
+- [ ] **Step 10: Live check**
 
 Run `npm run dev`, open the app, and confirm the "All synced" indicator renders in the header and no console errors appear. (Provoking an actual pending/failed state requires the reachability/drain wiring exercised more fully in Task 12's end-to-end pass — this step just confirms the component renders correctly in the idle case.)
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
-git add app/components/TaskRow.vue app/components/SyncStatus.vue app/pages/index.vue
+git add app/components/TaskRow.vue app/components/SyncStatus.vue app/utils/syncStatusLabel.ts test/utils/syncStatusLabel.test.ts app/pages/index.vue
 git commit -m "feat: show a pending-sync badge on rows and a header sync status"
 ```
 
@@ -1424,6 +1662,8 @@ git commit -m "feat: show a pending-sync badge on rows and a header sync status"
 
 **Interfaces:**
 - Produces: an installable PWA (manifest + registered service worker) that precaches the app shell so the installed app opens with zero connectivity. Background Sync registration is added on top of this in Task 11.
+
+This task is declarative config plus inherently browser-platform behavior (manifest fields, `injectManifest` precaching, service worker registration/activation) — there's no branching logic here to extract into a pure, unit-testable function the way Tasks 8/9/11 have one. It stays live-verified only (Steps 5–6 below), consistent with the test-coverage decision for this plan.
 
 - [ ] **Step 1: Install PWA dependencies**
 
@@ -1546,9 +1786,59 @@ git commit -m "feat: add PWA manifest and service worker for offline installabil
 
 **Interfaces:**
 - Consumes: `drainQueue`/`checkReachableAndDrain` from Task 8.
-- Produces: a `SYNC_TAG = 'offline-queue-drain'` constant registered whenever an action is queued, and a service worker `sync` event listener that asks any open tab to drain when the browser decides connectivity is back.
+- Produces: `shouldAttemptBackgroundSync(connection: { type?: string } | undefined): boolean` from `app/utils/backgroundSync.ts` — the cellular-skip rule, kept as a pure predicate so it's unit-testable without a real `navigator.connection`. Also produces a `SYNC_TAG = 'offline-queue-drain'` constant registered whenever an action is queued, and a service worker `sync` event listener that asks any open tab to drain when the browser decides connectivity is back.
 
-- [ ] **Step 1: Add the `sync` event listener to the service worker**
+- [ ] **Step 1: Write the failing unit test for the cellular-skip predicate**
+
+Create `test/utils/backgroundSync.test.ts`:
+
+```ts
+import { describe, it, expect } from 'vitest'
+import { shouldAttemptBackgroundSync } from '../../app/utils/backgroundSync'
+
+describe('shouldAttemptBackgroundSync', () => {
+  it('skips when the connection type is cellular', () => {
+    expect(shouldAttemptBackgroundSync({ type: 'cellular' })).toBe(false)
+  })
+
+  it('attempts on wifi', () => {
+    expect(shouldAttemptBackgroundSync({ type: 'wifi' })).toBe(true)
+  })
+
+  it('attempts when connection info is unavailable', () => {
+    expect(shouldAttemptBackgroundSync(undefined)).toBe(true)
+  })
+})
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `npm test -- backgroundSync`
+Expected: FAIL with a module-not-found error.
+
+- [ ] **Step 3: Implement the predicate**
+
+Create `app/utils/backgroundSync.ts`:
+
+```ts
+// A background sync firing off the home LAN is known to fail (the PC is
+// only reachable from home Wi-Fi — see
+// docs/superpowers/specs/2026-08-07-offline-pwa-sync-design.md), so skip
+// attempting it on cellular rather than spending battery/data on a doomed
+// request. `navigator.connection` isn't universally supported, so a
+// missing/undefined connection defaults to attempting — the request will
+// just fail harmlessly if it's actually unreachable.
+export function shouldAttemptBackgroundSync(connection: { type?: string } | undefined): boolean {
+  return connection?.type !== 'cellular'
+}
+```
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+Run: `npm test -- backgroundSync`
+Expected: PASS (all three tests).
+
+- [ ] **Step 5: Add the `sync` event listener to the service worker**
 
 In `service-worker/sw.ts`, add below the existing `activate` listener:
 
@@ -1570,19 +1860,23 @@ self.addEventListener('sync', (event) => {
 
 (`SyncEvent` isn't in the default `webworker` lib types; if TypeScript complains, add `declare interface SyncEvent extends ExtendableEvent { tag: string }` near the top of the file, below the `ServiceWorkerGlobalScope` declaration.)
 
-- [ ] **Step 2: Register a sync on every queued action, and listen for the drain message on the client**
+- [ ] **Step 6: Register a sync on every queued action, and listen for the drain message on the client**
 
-In `app/composables/useTodos.ts`, add a helper and call it from `queueAndApplyOptimistically`:
+In `app/composables/useTodos.ts`, add the import:
+
+```ts
+import { shouldAttemptBackgroundSync } from '../utils/backgroundSync'
+```
+
+Add a helper and call it from `queueAndApplyOptimistically`:
 
 ```ts
   const SYNC_TAG = 'offline-queue-drain'
 
   async function registerBackgroundSync() {
     if (!import.meta.client) return
-    // Skip on cellular — a background sync firing off the home LAN is
-    // known to fail, so don't spend battery/data attempting it.
     const connection = (navigator as { connection?: { type?: string } }).connection
-    if (connection?.type === 'cellular') return
+    if (!shouldAttemptBackgroundSync(connection)) return
     if (!('serviceWorker' in navigator)) return
     try {
       const registration = await navigator.serviceWorker.ready
@@ -1628,19 +1922,19 @@ let pollHandle: ReturnType<typeof setInterval> | undefined
 let messageListenerAttached = false
 ```
 
-- [ ] **Step 3: Run the full test suite**
+- [ ] **Step 7: Run the full test suite**
 
 Run: `npm test`
-Expected: PASS (no regressions).
+Expected: PASS — every test from Tasks 1–9 plus the three new `backgroundSync` tests from Step 4, no regressions.
 
-- [ ] **Step 4: Live check**
+- [ ] **Step 8: Live check**
 
 Run `npm run dev`, open the app in Chrome with DevTools → Application → Service Workers open, go offline (Network tab), add a todo (it should queue and show the pending badge), confirm in the Service Workers panel that a "Sync" registration appears (Chrome surfaces pending Background Sync registrations there), then go back online and confirm the queue drains (badge disappears, "All synced" shows).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add service-worker/sw.ts app/composables/useTodos.ts
+git add service-worker/sw.ts app/composables/useTodos.ts app/utils/backgroundSync.ts test/utils/backgroundSync.test.ts
 git commit -m "feat: register Background Sync so the queue can drain outside the foreground poll"
 ```
 
@@ -1654,7 +1948,7 @@ git commit -m "feat: register Background Sync so the queue can drain outside the
 - [ ] **Step 1: Full automated suite**
 
 Run: `npm test`
-Expected: PASS, every test from Tasks 1–6.
+Expected: PASS, every test from Tasks 1–11.
 
 - [ ] **Step 2: Live pass — full offline CRUD cycle on desktop Chrome**
 
@@ -1706,5 +2000,6 @@ git commit -m "docs: document offline/PWA usage"
 ## Self-Review Notes
 
 - **Spec coverage:** local cache (Task 5), pending queue + collapsing rule (Task 6), client-generated ids + idempotent create (Task 4), offline-aware dispatch for all five mutation types incl. the previously-inline edit path (Task 7), reachability polling + drain + forceSync + sync report (Task 8), non-checkbox pending badge + status indicator (Task 9), idempotent PATCH/DELETE (Tasks 2–3), PWA shell/installability (Task 10), Background Sync with cellular skip (Task 11), testing + manual device pass + docs (Task 12). All design-doc sections are covered.
-- **Type consistency checked:** `PendingAction`'s `status: 'pending' | 'failed'` field (introduced in Task 6) is used consistently by Task 8's `drainQueue` and Task 9's `SyncStatus` props. `editTodo`'s signature in Task 7 matches its call site in Task 7 Step 8. `TodoNotFound`/`isTodoNotFound` from Task 2 are used with matching shapes in Task 7's `completeTodo`/`reopenTodo`/`editTodo`.
+- **Type consistency checked:** `PendingAction`'s `status: 'pending' | 'failed'` field (introduced in Task 6) is used consistently by Task 8's `drainActions`/`drainQueue` and Task 9's `SyncStatus` props. `editTodo`'s signature in Task 7 matches its call site in Task 7 Step 8. `TodoNotFound`/`isTodoNotFound` from Task 2 are used with matching shapes in Task 7's `completeTodo`/`reopenTodo`/`editTodo`. `drainActions`'s `DrainOutcome` shape (Task 8) is consumed identically by `drainQueue`'s destructuring in the same task.
 - **No placeholders:** every step has concrete, complete code — nothing marked TBD or "similar to above."
+- **Test-coverage policy applied consistently:** after the pre-flight scan (see Global Constraints), Tasks 2, 8, 9, and 11 were each revised to extract their branching logic into a unit-tested `app/utils/` module (`isTodoNotFound` alongside Task 2's existing e2e test, `drainActions`, `computeSyncStatusLabel`, `shouldAttemptBackgroundSync`); Task 10 was left live-verified-only with an explicit note explaining why (no pure logic exists to extract there).
