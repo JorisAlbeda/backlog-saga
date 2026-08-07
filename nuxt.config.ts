@@ -28,7 +28,10 @@ export default defineNuxtConfig({
       '* * * * *': ['guild:resolve']
     },
     storage: {
-      data: { driver: 'fs', base: './.data/db' }
+      // Overridable so test runs can point storage at an isolated temp
+      // directory instead of the real .data/db — same pattern as CODEX_DIR
+      // above, resolved once here against this file's own directory.
+      data: { driver: 'fs', base: process.env.DATA_DIR ? resolve(rootDir, process.env.DATA_DIR) : './.data/db' }
     }
   }
 })
