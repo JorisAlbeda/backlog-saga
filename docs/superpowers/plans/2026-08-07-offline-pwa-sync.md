@@ -144,7 +144,7 @@ In `package.json`, add to `"scripts"`:
 
 - [ ] **Step 5: Write a smoke test proving the e2e harness works end-to-end**
 
-Create `test/server/smoke.e2e.test.ts`:
+Create `test/server/smoke.e2e.test.ts`. Set `process.env.DATA_DIR` directly rather than via `setup()`'s `env` option: `@nuxt/test-utils`'s `setup()` builds Nuxt in-process before ever spawning the runtime server, and `nuxt.config.ts` resolves `DATA_DIR` at that build step — `setup()`'s `env` option only reaches the *spawned server's* environment, which is too late; the storage path is already baked into the build by then. Mutating `process.env.DATA_DIR` before calling `setup()` (with no arguments) means the build step itself sees it.
 
 ```ts
 import { describe, it, expect, afterAll } from 'vitest'
@@ -154,10 +154,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const dataDir = mkdtempSync(join(tmpdir(), 'backlog-saga-test-'))
+process.env.DATA_DIR = dataDir
 
-await setup({
-  env: { DATA_DIR: dataDir }
-})
+await setup()
 
 afterAll(() => {
   rmSync(dataDir, { recursive: true, force: true })
@@ -232,7 +231,7 @@ Expected: FAIL with a module-not-found error (`isTodoNotFound` doesn't exist yet
 
 - [ ] **Step 1: Write the failing e2e test**
 
-Create `test/server/todos-idempotency.e2e.test.ts`:
+Create `test/server/todos-idempotency.e2e.test.ts`. As in Task 1's smoke test, set `process.env.DATA_DIR` directly before calling `setup()` — `setup()`'s own `env` option only reaches the spawned runtime server, too late for the build step that resolves the storage path:
 
 ```ts
 import { describe, it, expect, afterAll } from 'vitest'
@@ -242,10 +241,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const dataDir = mkdtempSync(join(tmpdir(), 'backlog-saga-test-'))
+process.env.DATA_DIR = dataDir
 
-await setup({
-  env: { DATA_DIR: dataDir }
-})
+await setup()
 
 afterAll(() => {
   rmSync(dataDir, { recursive: true, force: true })
