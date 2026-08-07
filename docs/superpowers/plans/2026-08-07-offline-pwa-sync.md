@@ -127,10 +127,12 @@ import { defineVitestConfig } from '@nuxt/test-utils/config'
 
 export default defineVitestConfig({
   test: {
-    environment: 'happy-dom'
+    environment: 'node'
   }
 })
 ```
+
+(`node`, not `happy-dom`, as the default: `@nuxt/test-utils/e2e`'s `setup()` needs Node built-ins that a browser-simulating environment can't bundle. Tasks 5 and 6's tests use `localStorage`, so they opt into `happy-dom` per-file instead, via a `// @vitest-environment happy-dom` docblock at the top of those two test files specifically — see those tasks.)
 
 - [ ] **Step 4: Add the `test` script**
 
@@ -513,9 +515,10 @@ git commit -m "feat: support idempotent client-supplied ids on todo creation"
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `test/utils/offlineCache.test.ts`:
+Create `test/utils/offlineCache.test.ts`. This file uses `localStorage`, which the project's default Vitest environment (`node`, set in Task 1) doesn't provide — the `// @vitest-environment happy-dom` docblock on the first line opts just this file into a DOM-simulating environment:
 
 ```ts
+// @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from 'vitest'
 import { loadCachedTodos, saveCachedTodos } from '../../app/utils/offlineCache'
 import type { Todo } from '../../shared/types'
@@ -616,9 +619,10 @@ git commit -m "feat: add local-storage cache for the offline todo mirror"
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `test/utils/offlineQueue.test.ts`:
+Create `test/utils/offlineQueue.test.ts`. Like Task 5's cache test, this file uses `localStorage`, so it needs the same per-file environment override:
 
 ```ts
+// @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
   loadQueue,
