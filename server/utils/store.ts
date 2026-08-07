@@ -53,11 +53,17 @@ export function assertValidCategory(category: unknown): asserts category is Cate
   }
 }
 
-export async function createTodo(title: string, category: Category): Promise<Todo> {
+export async function createTodo(title: string, category: Category, id?: string): Promise<Todo> {
   return withLock(async () => {
     const todos = await listTodos()
+    if (id) {
+      const existing = todos.find(t => t.id === id)
+      // Idempotent: a queued offline create retried after its first
+      // response was lost must not produce a second row.
+      if (existing) return existing
+    }
     const todo: Todo = {
-      id: crypto.randomUUID(),
+      id: id ?? crypto.randomUUID(),
       title,
       createdAt: new Date().toISOString(),
       completedAt: null,
