@@ -5,6 +5,7 @@ import { getFaction } from '~~/shared/factions'
 const props = defineProps<{
   todo: Todo
   lastSyncedAt: number
+  pending: boolean
 }>()
 
 const emit = defineEmits<{
@@ -117,6 +118,19 @@ function onBodyKeydown(e: KeyboardEvent) {
         {{ todo.resultName ?? faction.noun }} - {{ faction.doneVerb }}
       </p>
     </div>
+
+    <span
+      v-if="pending"
+      class="task-row__pending-badge"
+      role="img"
+      aria-label="Not yet synced to your PC"
+      title="Not yet synced to your PC"
+    >
+      <svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true">
+        <circle cx="10" cy="10" r="8" fill="none" stroke="var(--color-caption)" stroke-width="1.4" />
+        <path d="M10 6v4l3 2" fill="none" stroke="var(--color-caption)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+    </span>
 
     <div v-if="state === 'todo'" class="task-row__actions">
       <button
@@ -295,6 +309,12 @@ function onBodyKeydown(e: KeyboardEvent) {
   margin: 2px 0 0;
   font-size: 13px;
   color: var(--color-text-body);
+}
+
+.task-row__pending-badge {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .task-row__actions {

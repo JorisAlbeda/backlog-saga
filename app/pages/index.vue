@@ -14,6 +14,12 @@ const {
   removeTodo,
   startPolling,
   stopPolling,
+  pendingIds,
+  pendingActions,
+  syncStatus,
+  syncReport,
+  failedCount,
+  forceSync,
 } = useTodos()
 
 onMounted(async () => {
@@ -123,6 +129,13 @@ function inspectTodo(todo: Todo) {
   <div class="ledger-page">
     <LedgerHeader />
 
+    <SyncStatus
+      :pending-count="pendingActions.filter((a) => a.status === 'pending').length"
+      :failed-count="failedCount"
+      :syncing="syncStatus === 'syncing'"
+      @sync="forceSync"
+    />
+
     <EmptyState v-if="todos.length === 0" variant="ledger">
       <PrimaryButton variant="navy" @click="showAddOverlay = true"
         >Draft First Task</PrimaryButton
@@ -140,6 +153,7 @@ function inspectTodo(todo: Todo) {
             <TaskRow
               :todo="todo"
               :last-synced-at="lastSyncedAt"
+              :pending="pendingIds.has(todo.id)"
               @complete="handleComplete"
               @inspect="inspectTodo"
               @open="goToDispatch"
