@@ -17,8 +17,15 @@ export default defineNuxtConfig({
   // The installed app must open from the service worker's cache with zero
   // connectivity, so it can't rely on a fresh server render — see
   // docs/superpowers/specs/2026-08-07-offline-pwa-sync-design.md.
+  // `ssr: false` alone doesn't produce a static file for `/` — Nitro still
+  // generates the document per-request, it just skips rendering Vue content
+  // into it. `prerender: true` is what makes Nitro emit an actual
+  // `.output/public/index.html` at build time (a bare client-hydration
+  // shell, since `ssr: false` means no server-rendered content goes into
+  // it) — that file is what the injectManifest glob below and the
+  // navigation-fallback route in service-worker/sw.ts precache and serve.
   routeRules: {
-    '/': { ssr: false }
+    '/': { ssr: false, prerender: true }
   },
   pwa: {
     strategies: 'injectManifest',

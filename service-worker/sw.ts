@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
-import { precacheAndRoute } from 'workbox-precaching'
+import { createHandlerBoundToURL, precacheAndRoute } from 'workbox-precaching'
+import { NavigationRoute, registerRoute } from 'workbox-routing'
 
 declare let self: ServiceWorkerGlobalScope
 
@@ -7,6 +8,27 @@ declare let self: ServiceWorkerGlobalScope
 // assets — this is what lets the installed app open with zero
 // connectivity instead of needing the PC's server to render anything.
 precacheAndRoute(self.__WB_MANIFEST)
+
+// Precaching alone only satisfies requests for exact precached URLs (the
+// built JS/CSS/the prerendered document itself). It does NOT make an
+// arbitrary navigation request (e.g. a reload while offline, or any route
+// other than `/`) resolve to the cached shell — for that, browser
+// navigations need to be explicitly routed to the precached document.
+//
+// The bound URL below MUST match the manifest entry's `url` field exactly,
+// or createHandlerBoundToURL throws `non-precached-url` at SW script
+// evaluation time (killing the worker outright). Nitro's `prerender: true`
+// writes the file to `.output/public/index.html`, but the injectManifest
+// glob records it under the route path `/`, not `/index.html` — verified
+// against this project's built .output/public/sw.js manifest.
+//
+// Denylist `/api/*` so offline navigation fallback doesn't swallow data
+// requests that should genuinely fail/queue instead of returning HTML.
+registerRoute(
+  new NavigationRoute(createHandlerBoundToURL('/'), {
+    denylist: [/^\/api\//]
+  })
+)
 
 self.skipWaiting()
 self.addEventListener('activate', () => self.clients.claim())
