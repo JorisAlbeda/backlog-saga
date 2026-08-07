@@ -36,7 +36,10 @@ export default defineNuxtConfig({
     srcDir: '../service-worker',
     filename: 'sw.ts',
     registerType: 'autoUpdate',
-    devOptions: { enabled: true, type: 'module' },
+    // Without navigateFallback, the dev-mode precache manifest is empty, so
+    // createHandlerBoundToURL('/') in service-worker/sw.ts throws at
+    // service-worker script-evaluation time on every `npm run dev`.
+    devOptions: { enabled: true, type: 'module', navigateFallback: '/' },
     injectManifest: {
       globPatterns: ['**/*.{js,css,html,svg,png,ico}']
     },

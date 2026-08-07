@@ -40,6 +40,10 @@ registerRoute(
 self.skipWaiting()
 self.addEventListener('activate', () => self.clients.claim())
 
+// Kept in sync manually with the identical constant in
+// app/composables/useTodos.ts — the app bundle and the service worker are
+// built separately and can't share a runtime import across that boundary,
+// so if you change this, change it there too.
 const SYNC_TAG = 'offline-queue-drain'
 
 self.addEventListener('sync', (event) => {

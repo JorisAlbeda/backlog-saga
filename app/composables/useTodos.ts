@@ -130,6 +130,10 @@ export function useTodos() {
     if (import.meta.client) saveQueue(pendingActions.value)
   }
 
+  // Kept in sync manually with the identical constant in
+  // service-worker/sw.ts — the app bundle and the service worker are built
+  // separately and can't share a runtime import across that boundary, so
+  // if you change this, change it there too.
   const SYNC_TAG = 'offline-queue-drain'
 
   async function registerBackgroundSync() {
@@ -159,7 +163,14 @@ export function useTodos() {
   async function refresh() {
     loading.value = true
     try {
-      todos.value = await $fetch<Todo[]>('/api/todos')
+      const server = await $fetch<Todo[]>('/api/todos')
+      // Reconcile against the pending queue rather than a bare replace — a
+      // wholesale overwrite here would silently erase unsynced optimistic
+      // state (offline creates vanish, offline completes un-complete,
+      // offline deletes reappear) any time a refresh succeeds while the
+      // queue is still non-empty (initial mount, or drainQueue()'s own
+      // trailing refresh after a partial/failed drain).
+      todos.value = pendingActions.value.reduce(applyActionOptimistically, server)
       lastSyncedAt.value = Date.now()
       persistCache()
     } finally {
@@ -168,7 +179,13 @@ export function useTodos() {
   }
 
   async function createTodo(title: string, category: Category) {
-    const tempId = crypto.randomUUID()
+    // crypto.randomUUID() is only defined in a secure context (HTTPS or
+    // localhost) — calling it on a plain http://<lan-ip>:3000 origin (how
+    // this app is meant to be reached from a phone) throws synchronously.
+    // See README's "Offline / installing as an app" section for the
+    // secure-context requirement this also implies for the PWA/service-worker
+    // layer as a whole.
+    const tempId = globalThis.crypto?.randomUUID?.() ?? `local-${Date.now()}-${Math.random().toString(36).slice(2)}`
     try {
       const todo = await $fetch<Todo>('/api/todos', { method: 'POST', body: { id: tempId, title, category } })
       todos.value = [...todos.value, todo]
@@ -247,12 +264,16 @@ export function useTodos() {
   function startPolling() {
     if (pollHandle || !import.meta.client) return
     pollHandle = setInterval(() => {
-      refresh().catch((err) => {
-        if (isNetworkFailure(err)) {
-          checkReachableAndDrain().catch(() => {})
-        } else {
-          console.error('[ledger] poll refresh failed', err)
-        }
+      // If there's queued work, route the tick through the reachability
+      // check + drain instead of a bare refresh() — refresh() alone
+      // succeeds silently the moment the PC becomes reachable again and
+      // never drains the queue; checkReachableAndDrain() already calls
+      // refresh() internally once it's done, so this doesn't lose the
+      // "reflect current server state" behavior of a normal poll tick.
+      const hasWork = pendingActions.value.some(a => a.status !== 'failed')
+      const tick = hasWork ? checkReachableAndDrain() : refresh()
+      tick.catch((err) => {
+        if (!isNetworkFailure(err)) console.error('[ledger] poll failed', err)
       })
     }, 15000)
   }

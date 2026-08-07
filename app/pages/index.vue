@@ -123,6 +123,13 @@ function inspectTodo(todo: Todo) {
   completingTodo.value = null
   inspectingTodoId.value = todo.id
 }
+
+// forceSync (via checkReachableAndDrain) can rethrow a non-network error
+// (a real HTTP error from a reachable server); left unhandled that would
+// surface as an unhandled rejection from this DOM event handler.
+function handleForceSync() {
+  forceSync().catch((err) => console.error("[ledger] force sync failed", err))
+}
 </script>
 
 <template>
@@ -133,7 +140,7 @@ function inspectTodo(todo: Todo) {
       :pending-count="pendingActions.filter((a) => a.status === 'pending').length"
       :failed-count="failedCount"
       :syncing="syncStatus === 'syncing'"
-      @sync="forceSync"
+      @sync="handleForceSync"
     />
 
     <EmptyState v-if="todos.length === 0" variant="ledger">

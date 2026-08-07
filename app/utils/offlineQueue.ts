@@ -1,5 +1,5 @@
 import type { Category, Todo } from '~~/shared/types'
-import { FACTIONS } from '~~/shared/factions'
+import { getFaction } from '~~/shared/factions'
 
 export type PendingAction =
   | { type: 'create', tempId: string, title: string, category: Category, status: 'pending' | 'failed' }
@@ -63,7 +63,7 @@ export function applyActionOptimistically(todos: Todo[], action: PendingAction):
         completedAt: null,
         guildStatus: 'init',
         category: action.category,
-        text: { init: FACTIONS[action.category].initTemplate },
+        text: { init: getFaction(action.category).initTemplate },
         chronicleWritten: false,
         version: 1
       }
@@ -87,7 +87,7 @@ export function applyActionOptimistically(todos: Todo[], action: PendingAction):
               completedAt: null,
               guildStatus: 'init',
               subtype: undefined,
-              text: { init: FACTIONS[t.category].initTemplate },
+              text: { init: getFaction(t.category).initTemplate },
               resultName: undefined,
               resultDetail: undefined,
               chronicleWritten: false

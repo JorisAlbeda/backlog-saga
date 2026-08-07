@@ -14,7 +14,11 @@ export default defineEventHandler(async (event) => {
     if (typeof body.id !== 'string' || !body.id.trim()) {
       throw createError({ statusCode: 400, statusMessage: 'id must be a non-empty string if provided' })
     }
-    id = body.id
+    const trimmed = body.id.trim()
+    if (trimmed.length > 64) {
+      throw createError({ statusCode: 400, statusMessage: 'id must be at most 64 characters' })
+    }
+    id = trimmed
   }
 
   return createTodo(title, category, id)

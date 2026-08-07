@@ -52,6 +52,29 @@ won't sync over cellular or from outside the home network.
 A small header indicator shows pending/failed sync state; tap it to force
 an immediate sync attempt instead of waiting for the next automatic check.
 
+**Secure-context requirement (deployment decision, not yet set up here).**
+The service worker/Background Sync layer above, and offline todo creation's
+client-side id generation (`crypto.randomUUID()`), both only work in a
+[secure context](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts) —
+HTTPS or `localhost`. Reaching this app from a phone at its natural address,
+a plain `http://<lan-ip>:3000`, does **not** qualify in Chrome (only
+`localhost`/HTTPS do), so both features — and the app's offline story as a
+whole — silently fail to install/queue at that origin. To actually test or
+use this from a phone on the LAN, pick one:
+
+1. **HTTPS reverse proxy**: put a reverse proxy in front of the Nitro
+   server with a self-signed certificate (e.g. via `mkcert`), and trust that
+   certificate on the phone. This is the option that also works for a real
+   day-to-day install.
+2. **Chrome flag, for local testing only**: on the phone, set
+   `chrome://flags/#unsafely-treat-insecure-origin-as-secure` to the LAN
+   origin (e.g. `http://192.168.1.50:3000`) and relaunch Chrome. Quick to
+   set up, but per-device/per-browser and not a real fix — not suitable for
+   "just works" day-to-day use.
+
+Neither option is set up in this repo — which one to use is a deployment
+decision left to whoever installs this on their own network.
+
 ## What's here
 
 - `server/api/todos/` — CRUD + completion for todos.
