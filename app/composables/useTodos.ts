@@ -9,6 +9,7 @@ import {
   applyActionOptimistically,
   isNetworkFailure
 } from '../utils/offlineQueue'
+import { drainActions } from '../utils/drainQueue'
 
 // Module-scoped so every caller of useTodos() shares the same interval handle
 // rather than each component starting its own poll loop.
@@ -31,6 +32,82 @@ export function useTodos() {
   }
 
   const pendingIds = computed(() => new Set(pendingActions.value.map(a => (a.type === 'create' ? a.tempId : a.id))))
+
+  const syncStatus = useState<'idle' | 'syncing'>('todos-sync-status', () => 'idle')
+  const syncReport = useState<{ message: string, at: string }[]>('todos-sync-report', () => [])
+  const failedCount = computed(() => pendingActions.value.filter(a => a.status === 'failed').length)
+
+  function logSyncReport(message: string) {
+    syncReport.value = [{ message, at: new Date().toISOString() }, ...syncReport.value].slice(0, 10)
+  }
+
+  async function replayAction(action: PendingAction): Promise<void> {
+    switch (action.type) {
+      case 'create':
+        await $fetch(`/api/todos`, { method: 'POST', body: { id: action.tempId, title: action.title, category: action.category } })
+        return
+      case 'patch':
+        await $fetch(`/api/todos/${action.id}`, { method: 'PATCH', body: { title: action.title, category: action.category } })
+        return
+      case 'complete':
+      case 'reopen':
+        await $fetch(`/api/todos/${action.id}`, { method: 'PATCH', body: { action: action.type } })
+        return
+      case 'delete':
+        await $fetch(`/api/todos/${action.id}`, { method: 'DELETE' })
+        return
+    }
+  }
+
+  function describeAction(action: PendingAction): string {
+    const target = action.type === 'create' ? action.title : action.id
+    return `${action.type} (${target})`
+  }
+
+  async function drainQueue() {
+    if (syncStatus.value === 'syncing') return
+    const drainable = pendingActions.value.filter(a => a.status !== 'failed')
+    if (drainable.length === 0) return
+
+    syncStatus.value = 'syncing'
+    const { remaining, resolvedMessages, failedMessages, stoppedEarly } = await drainActions(
+      pendingActions.value,
+      replayAction,
+      describeAction
+    )
+    for (const message of resolvedMessages) logSyncReport(message)
+    for (const message of failedMessages) logSyncReport(message)
+
+    pendingActions.value = remaining
+    persistQueue()
+    syncStatus.value = 'idle'
+    if (!stoppedEarly) {
+      await refresh()
+    }
+  }
+
+  async function checkReachableAndDrain() {
+    try {
+      await $fetch('/api/todos', { method: 'GET' })
+    } catch (err) {
+      if (!isNetworkFailure(err)) throw err
+      // PC unreachable — nothing to do until the next poll tick.
+      return
+    }
+    // drainQueue() already calls refresh() itself once it has actually
+    // drained something; only do it here for the "queue was already empty"
+    // case, where drainQueue() no-ops and skips that internal refresh —
+    // otherwise a successful drain would trigger two refreshes back to back.
+    const hadWork = pendingActions.value.some(a => a.status !== 'failed')
+    await drainQueue()
+    if (!hadWork) {
+      await refresh()
+    }
+  }
+
+  async function forceSync() {
+    await checkReachableAndDrain()
+  }
 
   function persistCache() {
     if (import.meta.client) saveCachedTodos(todos.value)
@@ -137,7 +214,15 @@ export function useTodos() {
 
   function startPolling() {
     if (pollHandle || !import.meta.client) return
-    pollHandle = setInterval(refresh, 15000)
+    pollHandle = setInterval(() => {
+      refresh().catch((err) => {
+        if (isNetworkFailure(err)) {
+          checkReachableAndDrain().catch(() => {})
+        } else {
+          console.error('[ledger] poll refresh failed', err)
+        }
+      })
+    }, 15000)
   }
 
   function stopPolling() {
@@ -153,6 +238,9 @@ export function useTodos() {
     loading,
     pendingActions,
     pendingIds,
+    syncStatus,
+    syncReport,
+    failedCount,
     refresh,
     createTodo,
     editTodo,
@@ -160,6 +248,7 @@ export function useTodos() {
     reopenTodo,
     removeTodo,
     startPolling,
-    stopPolling
+    stopPolling,
+    forceSync
   }
 }
