@@ -52,3 +52,23 @@ export async function drainActions(
 
   return { remaining, resolvedMessages, failedMessages, stoppedEarly }
 }
+
+// `remaining` reflects what to keep from `snapshot` — everything drainActions
+// decided not to resolve. Anything in `current` that ISN'T in `snapshot`
+// (by reference — enqueueAction always produces a new array via spread, so
+// object identity is preserved for untouched entries and a concurrently
+// enqueued action is a genuinely new object) was added *during* the drain
+// and must be preserved, or a concurrent mutation is silently lost.
+//
+// Known limitation: if a concurrent action collapses (via enqueueAction's
+// create+delete rule) against an item that's still mid-drain when the
+// concurrent action arrives, this doesn't fully reconcile that nested case —
+// that would need a stable per-action identity beyond object reference.
+export function reconcileQueueAfterDrain(
+  snapshot: PendingAction[],
+  current: PendingAction[],
+  remaining: PendingAction[]
+): PendingAction[] {
+  const addedDuringDrain = current.filter(a => !snapshot.includes(a))
+  return [...remaining, ...addedDuringDrain]
+}

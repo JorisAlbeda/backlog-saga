@@ -7,9 +7,10 @@ import {
   saveQueue,
   enqueueAction,
   applyActionOptimistically,
-  isNetworkFailure
+  isNetworkFailure,
+  isPendingCreate
 } from '../utils/offlineQueue'
-import { drainActions } from '../utils/drainQueue'
+import { drainActions, reconcileQueueAfterDrain } from '../utils/drainQueue'
 import { shouldAttemptBackgroundSync } from '../utils/backgroundSync'
 
 // Module-scoped so every caller of useTodos() shares the same interval handle
@@ -83,15 +84,16 @@ export function useTodos() {
     if (drainable.length === 0) return
 
     syncStatus.value = 'syncing'
+    const snapshot = pendingActions.value
     const { remaining, resolvedMessages, failedMessages, stoppedEarly } = await drainActions(
-      pendingActions.value,
+      snapshot,
       replayAction,
       describeAction
     )
     for (const message of resolvedMessages) logSyncReport(message)
     for (const message of failedMessages) logSyncReport(message)
 
-    pendingActions.value = remaining
+    pendingActions.value = reconcileQueueAfterDrain(snapshot, pendingActions.value, remaining)
     persistQueue()
     syncStatus.value = 'idle'
     if (!stoppedEarly) {
@@ -200,6 +202,10 @@ export function useTodos() {
   }
 
   async function editTodo(id: string, title: string, category: Category) {
+    if (isPendingCreate(pendingActions.value, id)) {
+      queueAndApplyOptimistically({ type: 'patch', id, title, category, status: 'pending' })
+      return
+    }
     try {
       const result = await $fetch<Todo | TodoNotFound>(`/api/todos/${id}`, { method: 'PATCH', body: { title, category } })
       if (isTodoNotFound(result)) {
@@ -215,6 +221,10 @@ export function useTodos() {
   }
 
   async function completeTodo(id: string) {
+    if (isPendingCreate(pendingActions.value, id)) {
+      queueAndApplyOptimistically({ type: 'complete', id, status: 'pending' })
+      return todos.value.find(t => t.id === id)
+    }
     try {
       const result = await $fetch<Todo | TodoNotFound>(`/api/todos/${id}`, { method: 'PATCH', body: { action: 'complete' } })
       if (isTodoNotFound(result)) {
@@ -233,6 +243,10 @@ export function useTodos() {
   }
 
   async function reopenTodo(id: string) {
+    if (isPendingCreate(pendingActions.value, id)) {
+      queueAndApplyOptimistically({ type: 'reopen', id, status: 'pending' })
+      return todos.value.find(t => t.id === id)
+    }
     try {
       const result = await $fetch<Todo | TodoNotFound>(`/api/todos/${id}`, { method: 'PATCH', body: { action: 'reopen' } })
       if (isTodoNotFound(result)) {
@@ -251,6 +265,10 @@ export function useTodos() {
   }
 
   async function removeTodo(id: string) {
+    if (isPendingCreate(pendingActions.value, id)) {
+      queueAndApplyOptimistically({ type: 'delete', id, status: 'pending' })
+      return
+    }
     try {
       await $fetch(`/api/todos/${id}`, { method: 'DELETE' })
       todos.value = todos.value.filter(t => t.id !== id)

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { drainActions } from '../../app/utils/drainQueue'
+import { drainActions, reconcileQueueAfterDrain } from '../../app/utils/drainQueue'
 import type { PendingAction } from '../../app/utils/offlineQueue'
 
 function describeAction(action: PendingAction): string {
@@ -60,5 +60,33 @@ describe('drainActions', () => {
     const result = await drainActions(actions, async () => { throw new Error('should not be called') }, describeAction)
     expect(result.remaining).toEqual(actions)
     expect(result.resolvedMessages).toEqual([])
+  })
+})
+
+describe('reconcileQueueAfterDrain', () => {
+  it('returns remaining unchanged when nothing was added during the drain', () => {
+    const snapshot: PendingAction[] = [{ type: 'delete', id: 't1', status: 'pending' }]
+    const remaining: PendingAction[] = []
+    // current === snapshot: nothing enqueued while the drain was in flight
+    const result = reconcileQueueAfterDrain(snapshot, snapshot, remaining)
+    expect(result).toEqual(remaining)
+  })
+
+  it('preserves an action enqueued during the drain', () => {
+    const snapshot: PendingAction[] = [{ type: 'delete', id: 't1', status: 'pending' }]
+    const remaining: PendingAction[] = []
+    const addedMidDrain: PendingAction = { type: 'complete', id: 't2', status: 'pending' }
+    const current = [...snapshot, addedMidDrain]
+    const result = reconcileQueueAfterDrain(snapshot, current, remaining)
+    expect(result).toEqual([addedMidDrain])
+  })
+
+  it('does not duplicate an item that appears in both remaining and current', () => {
+    const stillQueued: PendingAction = { type: 'delete', id: 't1', status: 'pending' }
+    const snapshot: PendingAction[] = [stillQueued]
+    const remaining: PendingAction[] = [stillQueued]
+    const current: PendingAction[] = [stillQueued]
+    const result = reconcileQueueAfterDrain(snapshot, current, remaining)
+    expect(result).toEqual([stillQueued])
   })
 })

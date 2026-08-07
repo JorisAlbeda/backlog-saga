@@ -101,6 +101,15 @@ export function applyActionOptimistically(todos: Todo[], action: PendingAction):
   }
 }
 
+// Whether `id` belongs to a 'create' action still sitting in the queue,
+// unsynced — i.e. the server has no record of this todo yet regardless
+// of current reachability, so hitting the network for it would either
+// get a misleading not-found (patch/complete/reopen) or leave a stale
+// queued create to resurrect it later (delete).
+export function isPendingCreate(queue: PendingAction[], id: string): boolean {
+  return queue.some(a => a.type === 'create' && a.tempId === id)
+}
+
 // ofetch's FetchError carries a `.response` when the server actually
 // responded (a real HTTP error status); a genuine network failure (PC
 // unreachable) has none. That distinction is what decides whether a

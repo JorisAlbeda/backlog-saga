@@ -6,6 +6,7 @@ import {
   enqueueAction,
   applyActionOptimistically,
   isNetworkFailure,
+  isPendingCreate,
   type PendingAction
 } from '../../app/utils/offlineQueue'
 import type { Todo } from '../../shared/types'
@@ -127,6 +128,27 @@ describe('applyActionOptimistically', () => {
       version: 1
     }
     expect(applyActionOptimistically([todo], { type: 'delete', id: 't1', status: 'pending' })).toEqual([])
+  })
+})
+
+describe('isPendingCreate', () => {
+  it('returns true when a matching pending create exists', () => {
+    const queue: PendingAction[] = [
+      { type: 'create', tempId: 'temp-1', title: 'Scratch idea', category: 'cleaning', status: 'pending' }
+    ]
+    expect(isPendingCreate(queue, 'temp-1')).toBe(true)
+  })
+
+  it('returns false when there is no such action', () => {
+    const queue: PendingAction[] = [
+      { type: 'create', tempId: 'temp-1', title: 'Scratch idea', category: 'cleaning', status: 'pending' }
+    ]
+    expect(isPendingCreate(queue, 'temp-2')).toBe(false)
+  })
+
+  it('returns false for a matching id that belongs to a different action type', () => {
+    const queue: PendingAction[] = [{ type: 'patch', id: 'temp-1', title: 'Renamed', status: 'pending' }]
+    expect(isPendingCreate(queue, 'temp-1')).toBe(false)
   })
 })
 
