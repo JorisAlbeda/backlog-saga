@@ -5,10 +5,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const dataDir = mkdtempSync(join(tmpdir(), 'backlog-saga-test-'))
+process.env.DATA_DIR = dataDir
 
-await setup({
-  env: { DATA_DIR: dataDir }
-})
+await setup()
 
 afterAll(() => {
   rmSync(dataDir, { recursive: true, force: true })
