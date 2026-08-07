@@ -30,4 +30,9 @@ describe('idempotent mutation endpoints', () => {
     })
     expect(result).toEqual({ id: 'also-missing', status: 'not-found' })
   })
+
+  it('DELETE on a missing id returns 200 ok, not a 404', async () => {
+    const result = await $fetch('/api/todos/never-existed', { method: 'DELETE' })
+    expect(result).toEqual({ ok: true })
+  })
 })

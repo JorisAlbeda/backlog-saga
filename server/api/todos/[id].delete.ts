@@ -3,9 +3,9 @@ export default defineEventHandler(async (event) => {
   if (!id) {
     throw createError({ statusCode: 400, statusMessage: 'id is required' })
   }
-  const deleted = await deleteTodo(id)
-  if (!deleted) {
-    throw createError({ statusCode: 404, statusMessage: 'todo not found' })
-  }
+  // Idempotent: the desired end state ("this todo doesn't exist") is
+  // already true whether or not it existed a moment ago, so there's
+  // nothing to distinguish in the response either way.
+  await deleteTodo(id)
   return { ok: true }
 })
