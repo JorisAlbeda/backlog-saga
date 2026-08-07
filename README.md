@@ -38,6 +38,20 @@ but should get a real pass once pointed at a live model.
 To force a resolution pass without waiting for the once-a-minute cron, hit
 Nitro's dev task endpoint: `curl -X POST http://localhost:3000/_nitro/tasks/guild:resolve`.
 
+## Offline / installing as an app
+
+The ledger page can be installed as a PWA on Android (Chrome menu → "Add
+to Home screen" / "Install app") and works fully offline once installed —
+adding, editing, completing, reopening, and deleting todos all work with
+no connection. Changes made offline are queued locally and sync back to
+this PC automatically the next time the phone is on the same Wi-Fi network
+as it — reachability is Wi-Fi-only by design (see
+`docs/superpowers/specs/2026-08-07-offline-pwa-sync-design.md`), so it
+won't sync over cellular or from outside the home network.
+
+A small header indicator shows pending/failed sync state; tap it to force
+an immediate sync attempt instead of waiting for the next automatic check.
+
 ## What's here
 
 - `server/api/todos/` — CRUD + completion for todos.
@@ -157,3 +171,17 @@ resolution has started, so they stay read-only in this build.
   Ledger ↔ Chronicle all confirmed in-browser at the 402px mobile frame.
 - `world-material.md` was **not** created during this session, correctly —
   nothing has reached the `chronicled` tier without a reachable Ollama.
+- **Offline PWA sync** (added later): the full offline CRUD cycle —
+  create, edit, complete, and delete while offline (simulated via
+  Playwright's `context.setOffline(true)` against a real running server,
+  not mocked) — was verified end-to-end: each change applied immediately
+  with a pending-sync indicator, the header correctly counted "4 changes
+  pending," and after going back online every change synced and matched
+  the server's actual stored state on a fresh reload, with the pending
+  indicators clearing. **Not verified here**: an actual install-to-home-screen
+  + Airplane Mode pass on a real Android phone — that needs physical
+  hardware this build environment doesn't have. The service worker's
+  offline-shell precaching and Background Sync registration were verified
+  against real production build artifacts (a `vm`-based harness loading
+  the actual built `sw.js`), but a genuine on-device pass is still worth
+  doing before relying on this day to day.
