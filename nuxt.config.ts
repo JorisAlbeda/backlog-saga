@@ -74,8 +74,12 @@ export default defineNuxtConfig({
     storage: {
       // Overridable so test runs can point storage at an isolated temp
       // directory instead of the real .data/db — same pattern as CODEX_DIR
-      // above, resolved once here against this file's own directory.
-      data: { driver: 'fs', base: process.env.DATA_DIR ? resolve(rootDir, process.env.DATA_DIR) : './.data/db' }
+      // above, resolved once here against this file's own directory. The
+      // fallback is resolved the same way (not left as a bare relative
+      // string) because `nuxt preview` runs with `.output` as its cwd, not
+      // the project root — a bare './.data/db' would silently resolve to
+      // .output/.data/db there, diverging from what `nuxt dev` uses.
+      data: { driver: 'fs', base: resolve(rootDir, process.env.DATA_DIR ?? '.data/db') }
     }
   }
 })
