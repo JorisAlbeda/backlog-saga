@@ -64,6 +64,28 @@ export function getTaskState(todo: Pick<Todo, 'completedAt' | 'guildStatus'>): T
   return todo.guildStatus === 'chronicled' ? 'done' : 'taking-shape'
 }
 
+// A `Done` todo is eligible for the daily retention sweep once more than
+// `retentionDays` days have elapsed since it was completed. `retentionDays
+// <= 0` means cleanup is disabled — nothing is ever eligible (0 is a
+// deliberate off-switch, distinct from an unset/default value, which
+// callers resolve before reaching here). `chronicleWritten` is checked
+// redundantly with getTaskState's 'done' check — guild.ts always sets
+// guildStatus: 'chronicled' and chronicleWritten: true together, only
+// after the chronicle write actually succeeds — as a second, defensive
+// guard against ever selecting a todo whose chronicle write didn't land.
+export function isEligibleForCleanup(
+  todo: Pick<Todo, 'completedAt' | 'guildStatus' | 'chronicleWritten'>,
+  retentionDays: number,
+  now: number = Date.now()
+): boolean {
+  if (retentionDays <= 0) return false
+  if (getTaskState(todo) !== 'done') return false
+  if (!todo.chronicleWritten) return false
+  if (!todo.completedAt) return false
+  const ageMs = now - new Date(todo.completedAt).getTime()
+  return ageMs > retentionDays * 24 * 60 * 60 * 1000
+}
+
 export function currentGuildText(todo: Pick<Todo, 'guildStatus' | 'text'>): string {
   if (todo.guildStatus === 'chronicled' && todo.text.chronicled) return todo.text.chronicled
   if (todo.guildStatus === 'drafted' && todo.text.drafted) return todo.text.drafted
