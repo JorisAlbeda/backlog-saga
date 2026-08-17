@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterAll } from 'vitest'
 import { createStorage } from 'unstorage'
 import fsDriver from 'unstorage/drivers/fs'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Todo } from '../../shared/types'
@@ -21,6 +21,10 @@ import type { Todo } from '../../shared/types'
 const dataDir = mkdtempSync(join(tmpdir(), 'backlog-saga-test-'))
 const storage = createStorage({ driver: fsDriver({ base: dataDir }) })
 ;(globalThis as any).useStorage = () => storage
+
+afterAll(() => {
+  rmSync(dataDir, { recursive: true, force: true })
+})
 
 // Dynamic import, after the stub above is in place — server/utils/store.ts
 // must not be statically imported (and therefore evaluated) before
