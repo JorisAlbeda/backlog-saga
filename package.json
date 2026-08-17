@@ -19,6 +19,7 @@
     "@nuxt/test-utils": "^4.1.0",
     "@vite-pwa/nuxt": "^1.1.1",
     "happy-dom": "^20.11.1",
+    "unstorage": "^1.17.5",
     "vitest": "^4.1.10",
     "workbox-precaching": "^7.4.1",
     "workbox-routing": "^7.4.1"

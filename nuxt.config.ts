@@ -1,5 +1,6 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { resolveRetentionDays } from './shared/types'
 
 // Resolved here, against this config file's own directory, rather than at
 // server runtime — process.cwd() at runtime isn't guaranteed to be the
@@ -64,12 +65,19 @@ export default defineNuxtConfig({
     // Path to the world codex (the `codex/` folder produced by the sibling
     // `rag` project's `catalogue.ts`), relative to this file. Empty disables
     // codex grounding.
-    codexDir: process.env.CODEX_DIR ? resolve(rootDir, process.env.CODEX_DIR) : ''
+    codexDir: process.env.CODEX_DIR ? resolve(rootDir, process.env.CODEX_DIR) : '',
+    // Days a Done todo stays in the Ledger after completion before the
+    // daily todos:cleanup task removes it (its content already lives on
+    // permanently in the Chronicle by that point). Unset defaults to 7.
+    // Explicitly 0 disables cleanup entirely — unset and 0 are deliberately
+    // different values, do not conflate them.
+    todoRetentionDays: resolveRetentionDays(process.env.TODO_RETENTION_DAYS)
   },
   nitro: {
     experimental: { tasks: true },
     scheduledTasks: {
-      '* * * * *': ['guild:resolve']
+      '* * * * *': ['guild:resolve'],
+      '0 3 * * *': ['todos:cleanup']
     },
     storage: {
       // Overridable so test runs can point storage at an isolated temp

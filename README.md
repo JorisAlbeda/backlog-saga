@@ -91,6 +91,10 @@ decision left to whoever installs this on their own network.
   throwing out of a single todo's failure.
 - `server/tasks/guild/resolve.ts` — the Nitro scheduled task (`* * * * *`)
   that drives the above.
+- `server/tasks/todos/cleanup.ts` — the daily scheduled task (`0 3 * * *`)
+  that removes Done todos older than `TODO_RETENTION_DAYS` (default 7,
+  `0` disables it) — their content is already permanently preserved in the
+  Chronicle by the time they're eligible.
 - `server/utils/worldMaterial.ts` — appends each finished entry to
   `world-material.md` (created at the project root on first write).
 - `shared/types.ts` — the `Todo`/`ChronicleEntry` shapes and the

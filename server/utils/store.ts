@@ -1,4 +1,4 @@
-import type { Category, ChronicleEntry, Todo } from '../../shared/types'
+import { type Category, type ChronicleEntry, type Todo, isEligibleForCleanup } from '../../shared/types'
 import { CATEGORIES, FACTIONS } from '../../shared/factions'
 
 const TODOS_KEY = 'todos.json'
@@ -116,6 +116,21 @@ export async function deleteTodo(id: string): Promise<boolean> {
     if (next.length === todos.length) return false
     await saveTodos(next)
     return true
+  })
+}
+
+// Called once a day by the todos:cleanup scheduled task. retentionDays <= 0
+// short-circuits before touching storage at all (isEligibleForCleanup would
+// reject everything anyway, but this also skips an unnecessary read+write
+// of the whole file when cleanup is disabled).
+export async function deleteOldDoneTodos(retentionDays: number): Promise<number> {
+  if (retentionDays <= 0) return 0
+  return withLock(async () => {
+    const todos = await listTodos()
+    const kept = todos.filter(t => !isEligibleForCleanup(t, retentionDays))
+    const removed = todos.length - kept.length
+    if (removed > 0) await saveTodos(kept)
+    return removed
   })
 }
 
