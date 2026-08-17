@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isTodoNotFound, isEligibleForCleanup } from '../../shared/types'
+import { isTodoNotFound, isEligibleForCleanup, resolveRetentionDays } from '../../shared/types'
 import type { Todo } from '../../shared/types'
 
 const sampleTodo: Todo = {
@@ -94,5 +94,27 @@ describe('isEligibleForCleanup', () => {
       chronicleWritten: true
     })
     expect(isEligibleForCleanup(todo, 0, now)).toBe(false)
+  })
+})
+
+describe('resolveRetentionDays', () => {
+  it('defaults to 7 when unset', () => {
+    expect(resolveRetentionDays(undefined)).toBe(7)
+  })
+
+  it('defaults to 7 when empty string', () => {
+    expect(resolveRetentionDays('')).toBe(7)
+  })
+
+  it('parses an explicit 0 as disabled, not the default', () => {
+    expect(resolveRetentionDays('0')).toBe(0)
+  })
+
+  it('parses a positive integer string', () => {
+    expect(resolveRetentionDays('14')).toBe(14)
+  })
+
+  it('falls back to 7 on an unparseable string', () => {
+    expect(resolveRetentionDays('abc')).toBe(7)
   })
 })

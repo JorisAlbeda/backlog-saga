@@ -1,5 +1,6 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { resolveRetentionDays } from './shared/types'
 
 // Resolved here, against this config file's own directory, rather than at
 // server runtime — process.cwd() at runtime isn't guaranteed to be the
@@ -70,7 +71,7 @@ export default defineNuxtConfig({
     // permanently in the Chronicle by that point). Unset defaults to 7.
     // Explicitly 0 disables cleanup entirely — unset and 0 are deliberately
     // different values, do not conflate them.
-    todoRetentionDays: process.env.TODO_RETENTION_DAYS ? Number(process.env.TODO_RETENTION_DAYS) : 7
+    todoRetentionDays: resolveRetentionDays(process.env.TODO_RETENTION_DAYS)
   },
   nitro: {
     experimental: { tasks: true },

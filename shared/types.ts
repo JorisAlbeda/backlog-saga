@@ -81,9 +81,32 @@ export function isEligibleForCleanup(
   if (retentionDays <= 0) return false
   if (getTaskState(todo) !== 'done') return false
   if (!todo.chronicleWritten) return false
+  // Unreachable in practice: getTaskState above already guarantees
+  // completedAt is set once state is 'done'. Kept only so TypeScript can
+  // narrow completedAt from `string | null` to `string` before the
+  // `new Date(...)` call below — not live defensive logic, do not remove.
   if (!todo.completedAt) return false
   const ageMs = now - new Date(todo.completedAt).getTime()
   return ageMs > retentionDays * 24 * 60 * 60 * 1000
+}
+
+// Resolves the raw TODO_RETENTION_DAYS env value into the number
+// isEligibleForCleanup expects. Unset or empty -> the default of 7.
+// Anything that doesn't parse to a finite number (including garbage
+// strings) also falls back to 7 rather than silently producing NaN, which
+// would make every isEligibleForCleanup call return false (via its own
+// NaN-safe age comparison) but log a confusing "NaNd" message from the
+// cleanup task. Pulled out of nuxt.config.ts as a named, directly testable
+// function specifically because it guards the difference between "unset"
+// (7) and "explicitly 0" (disabled) — the one distinction in this whole
+// feature that must never regress silently, e.g. via someone later
+// "simplifying" the config line to `Number(process.env.X) || 7`, which
+// would turn an explicit opt-out back into the default and resume
+// deleting a user's data.
+export function resolveRetentionDays(raw: string | undefined): number {
+  if (raw === undefined || raw === '') return 7
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) ? parsed : 7
 }
 
 export function currentGuildText(todo: Pick<Todo, 'guildStatus' | 'text'>): string {
